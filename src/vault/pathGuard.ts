@@ -62,6 +62,27 @@ export class PathGuard {
     return normalized;
   }
 
+  validateAssetDir(rawPath: unknown): string {
+    const normalized = this.validateDirPath(rawPath);
+    if (!normalized) throw new Error("asset directory is required");
+    return normalized;
+  }
+
+  validateAssetPath(rawPath: unknown, allowedExtensions: string[]): string {
+    if (typeof rawPath !== "string" || rawPath.trim() === "") throw new Error("asset path is required");
+    if (rawPath.includes("\0")) throw new Error("asset path contains a NUL byte");
+    if (path.isAbsolute(rawPath)) throw new Error("absolute asset paths are not allowed");
+    const normalized = path.posix.normalize(rawPath.replaceAll("\\", "/")).replace(/^\/+/, "");
+    if (normalized === "." || normalized.startsWith("../") || normalized.includes("/../")) {
+      throw new Error("asset path traversal is not allowed");
+    }
+    this.assertAllowedParts(normalized);
+    if (normalized.endsWith("/")) throw new Error("asset path must not end with /");
+    const ext = path.posix.extname(normalized).toLowerCase();
+    if (!allowedExtensions.includes(ext)) throw new Error(`asset extension is not allowed: ${ext || "(none)"}`);
+    return normalized;
+  }
+
   resolveCreate(relativePath: string): string {
     const absolute = path.resolve(this.root, relativePath);
     this.assertInsideRoot(absolute);

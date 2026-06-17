@@ -46,6 +46,8 @@ spec:
               value: /data/vault
             - name: DEFAULT_WRITE_DIR
               value: 98-Inbox
+            - name: MAX_REQUEST_BYTES
+              value: "16777216"
             - name: MCP_REQUIRE_TOKEN
               value: "false"
             - name: READ_ONLY
@@ -62,6 +64,16 @@ spec:
               value: "true"
             - name: ENABLE_APPEND_TO_INBOX
               value: "true"
+            - name: ENABLE_IMAGE_ASSETS
+              value: "true"
+            - name: ENABLE_EXTERNAL_REFERENCE_NOTES
+              value: "true"
+            - name: ASSETS_DIR_NAME
+              value: assets
+            - name: MAX_IMAGE_ASSET_BYTES
+              value: "10485760"
+            - name: ALLOWED_IMAGE_MIME_TYPES
+              value: image/png,image/jpeg,image/webp,image/gif
             - name: ENABLE_AUDIT_LOG
               value: "true"
             - name: AUDIT_LOG_PATH

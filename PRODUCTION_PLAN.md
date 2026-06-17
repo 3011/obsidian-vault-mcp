@@ -71,4 +71,4 @@ Validated before publish:
 - `npm test`
 - `docker build -t obsidian-vault-mcp:ci .`
 
-The immediate next step is runtime integration validation with the personal full-access tunnel profile: deploy `deploy/openai-tunnel-full-access.yaml`, point the OpenAI tunnel upstream at `http://obsidian-vault-mcp:80/mcp`, and connect ChatGPT. After that, add trash mode and backup-before-write to make full-access destructive tools easier to recover from.
+The immediate next step is runtime integration validation with the personal full-access tunnel profile: deploy `deploy/openai-tunnel-full-access.yaml`, point the OpenAI tunnel upstream at `http://obsidian-vault-mcp:80/mcp`, and connect ChatGPT. Validate full-access note operations plus image asset note creation. After that, add trash mode and backup-before-write to make full-access destructive tools easier to recover from.

@@ -22,6 +22,11 @@ ENABLE_VAULT_PATCH=true
 ENABLE_VAULT_DELETE=true
 ENABLE_VAULT_MOVE=true
 ENABLE_APPEND_TO_INBOX=true
+ENABLE_IMAGE_ASSETS=true
+ENABLE_EXTERNAL_REFERENCE_NOTES=true
+ASSETS_DIR_NAME=assets
+MAX_IMAGE_ASSET_BYTES=10485760
+ALLOWED_IMAGE_MIME_TYPES=image/png,image/jpeg,image/webp,image/gif
 
 ENABLE_AUDIT_LOG=true
 AUDIT_LOG_PATH=/data/audit/obsidian-vault-mcp.audit.log
@@ -41,6 +46,9 @@ vault_get_document_map
 search_simple
 tag_list
 append_to_inbox
+vault_upload_image_asset
+vault_create_note_with_assets
+vault_create_external_reference_note
 ```
 
 ## Kubernetes
@@ -62,7 +70,7 @@ The Service is intentionally `ClusterIP`; it should only be reachable from insid
 
 ## Operational Notes
 
-This mode is intentionally powerful. The server still blocks path traversal, symlink escape, sensitive vault internals, and non-Markdown file targets, but GPT can create, overwrite, patch, move, and delete allowed Markdown files.
+This mode is intentionally powerful. The server still blocks path traversal, symlink escape, sensitive vault internals, arbitrary attachment uploads, and non-image asset writes, but GPT can create, overwrite, patch, move, and delete allowed Markdown files and can store small image assets.
 
 Before using it with a primary vault:
 
@@ -70,6 +78,8 @@ Before using it with a primary vault:
 - keep audit logging enabled;
 - test against a vault copy first;
 - prefer `append_to_inbox` for routine capture workflows;
+- prefer `vault_create_external_reference_note` for PDFs, Word, Excel, zip files, and large log bundles;
+- use `vault_create_note_with_assets` only for screenshots, diagrams, and other small images that belong in the note;
 - review destructive tool calls carefully in the ChatGPT UI when confirmation is shown.
 
 The next hardening features for this profile are trash mode for delete and backup-before-write for mutating tools.

@@ -17,9 +17,10 @@
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "node dist/src/server.js",
-    "test": "npm run build && node dist/test/markdown-unit.js && node dist/test/integration.js && node dist/test/concurrency.js && node dist/test/markdown-yaml.js && node dist/test/sdk-client.js",
+    "test": "npm run build && node dist/test/markdown-unit.js && node dist/test/integration.js && node dist/test/assets.js && node dist/test/concurrency.js && node dist/test/markdown-yaml.js && node dist/test/sdk-client.js",
     "test:unit": "npm run build && node dist/test/markdown-unit.js",
     "test:integration": "npm run build && node dist/test/integration.js",
+    "test:assets": "npm run build && node dist/test/assets.js",
     "test:concurrency": "npm run build && node dist/test/concurrency.js",
     "test:markdown": "npm run build && node dist/test/markdown-yaml.js",
     "test:sdk": "npm run build && node dist/test/sdk-client.js"

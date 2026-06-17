@@ -23,6 +23,9 @@ It does not depend on Obsidian, plugin APIs, command palette, active files, or G
 - `search_simple`: full-vault substring search with context.
 - `tag_list`: list tags with counts, including nested tag parent counts.
 - `append_to_inbox`: append content to a note under the default inbox directory.
+- `vault_upload_image_asset`: upload a small image asset and return an Obsidian embed link.
+- `vault_create_note_with_assets`: create a Markdown note and store image assets beside it.
+- `vault_create_external_reference_note`: create a structured note that references external files without uploading them.
 
 Destructive tools are intentionally exposed because the operator accepts that risk. The server still blocks absolute paths, `..`, symlink escape, temp files, and sensitive vault internals such as `.obsidian/`, `.livesync/`, `.git/`, `.trash/`, and `node_modules/`.
 
@@ -34,6 +37,9 @@ Destructive tools are intentionally exposed because the operator accepts that ri
 - `vault_patch` supports heading, block, and frontmatter targets with `replace`, `prepend`, and `append`; it also supports `createTargetIfMissing`, `rejectIfContentPreexists`, `trimTargetWhitespace`, `targetDelimiter`, `contentType`, and `targetScope`.
 - Duplicate heading paths currently follow `markdown-patch` map behavior: the later matching heading wins. Prefer unique heading paths when using `vault_patch` or pass a more specific nested path.
 - `vault_move` supports destination directories ending in `/` and optional overwrite.
+- `vault_upload_image_asset` accepts PNG, JPEG, WebP, and GIF only; it verifies MIME, extension, size, basic magic bytes, and requires the target directory to be named `assets`.
+- `vault_create_note_with_assets` stores images under a note-local `assets/` directory and replaces `{{asset:n}}` placeholders with embeds.
+- `vault_create_external_reference_note` is for NAS, cloud drive, ticket, PDF, Word, Excel, zip, or log bundle references that should not be stored in the vault.
 - `search_simple` returns all matches per file with filename/content source and context.
 - `tag_list` scans frontmatter tags and inline tags, including parent counts for nested tags.
 
@@ -58,7 +64,7 @@ MCP_TOKEN=change-me VAULT_ROOT=/tmp/vault npm start
 | `MCP_ALLOWED_ORIGINS` | empty | Comma-separated CORS allowlist; `*` allows all. |
 | `VAULT_ROOT` | `/data/vault` | Markdown vault root. |
 | `DEFAULT_WRITE_DIR` | `98-Inbox` | Inbox directory for `append_to_inbox`. |
-| `MAX_REQUEST_BYTES` | `1048576` | Maximum JSON request body size. |
+| `MAX_REQUEST_BYTES` | `16777216` | Maximum JSON request body size. Keep this larger than base64-encoded image assets. |
 | `READ_ONLY` | `false` | Hide all mutating tools when true. |
 | `ENABLE_VAULT_WRITE` | `true` | Expose `vault_write`. |
 | `ENABLE_VAULT_APPEND` | `true` | Expose `vault_append`. |
@@ -66,6 +72,11 @@ MCP_TOKEN=change-me VAULT_ROOT=/tmp/vault npm start
 | `ENABLE_VAULT_DELETE` | `true` | Expose `vault_delete`. |
 | `ENABLE_VAULT_MOVE` | `true` | Expose `vault_move`. |
 | `ENABLE_APPEND_TO_INBOX` | `true` | Expose `append_to_inbox`. |
+| `ENABLE_IMAGE_ASSETS` | `true` | Expose image asset upload and note-with-assets tools. |
+| `ENABLE_EXTERNAL_REFERENCE_NOTES` | `true` | Expose external reference note creation. |
+| `ASSETS_DIR_NAME` | `assets` | Directory name used for note-local image assets. |
+| `MAX_IMAGE_ASSET_BYTES` | `10485760` | Maximum decoded image asset size. |
+| `ALLOWED_IMAGE_MIME_TYPES` | `image/png,image/jpeg,image/webp,image/gif` | Comma-separated image MIME allowlist. |
 | `ENABLE_AUDIT_LOG` | `true` | Log mutating operations as JSON. |
 
 ## Safety Model
@@ -77,6 +88,7 @@ The server allows destructive tools when enabled, but still enforces baseline fi
 - no symlink escape from the vault root;
 - no access to `.obsidian/`, `.livesync/`, `.git/`, `.trash/`, or `node_modules/`;
 - no temp/swap files;
+- no arbitrary attachment uploads; only small image assets are accepted as vault files;
 - per-file locks for write, append, patch, move, and delete;
 - atomic writes with temp file, fsync, and rename;
 - JSON audit logs for mutating operations.
@@ -88,7 +100,7 @@ npm run typecheck
 npm test
 ```
 
-The test suite starts the HTTP MCP server and covers all exposed tools, authentication failure, path traversal rejection, sensitive directory rejection, symlink escape rejection, overwrite move behavior, patch variants, search multi-match behavior, and tag aggregation.
+The test suite starts the HTTP MCP server and covers all exposed tools, authentication failure, path traversal rejection, sensitive directory rejection, symlink escape rejection, overwrite move behavior, patch variants, image asset validation, external reference note creation, search multi-match behavior, and tag aggregation.
 
 It also runs an official `@modelcontextprotocol/sdk` Streamable HTTP client compatibility test that connects to `/mcp`, lists tools, and calls `vault_read`, `vault_write`, and `search_simple`.
 
@@ -136,7 +148,7 @@ kubectl apply -f deploy/openai-tunnel-full-access.yaml
 kubectl -n YOUR_NAMESPACE rollout status deploy/obsidian-vault-mcp
 ```
 
-This profile sets `MCP_REQUIRE_TOKEN=false`, `READ_ONLY=false`, and enables write, append, patch, delete, move, and inbox append tools. It assumes the MCP server is only reachable through a private tunnel such as OpenAI Secure MCP Tunnel, with the tunnel upstream pointed at:
+This profile sets `MCP_REQUIRE_TOKEN=false`, `READ_ONLY=false`, and enables write, append, patch, delete, move, inbox append, image asset, and external reference note tools. It assumes the MCP server is only reachable through a private tunnel such as OpenAI Secure MCP Tunnel, with the tunnel upstream pointed at:
 
 ```text
 http://obsidian-vault-mcp:80/mcp

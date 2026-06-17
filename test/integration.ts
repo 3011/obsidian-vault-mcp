@@ -96,7 +96,10 @@ async function testToolDiscovery(port: number): Promise<void> {
     "vault_get_document_map",
     "search_simple",
     "tag_list",
-    "append_to_inbox"
+    "append_to_inbox",
+    "vault_upload_image_asset",
+    "vault_create_note_with_assets",
+    "vault_create_external_reference_note"
   ]) {
     assert(names.includes(expected), `missing tool ${expected}`);
   }
@@ -316,6 +319,9 @@ async function testReadOnlyMode(): Promise<void> {
     assert(names.includes("search_simple"));
     assert(!names.includes("vault_write"));
     assert(!names.includes("vault_delete"));
+    assert(!names.includes("vault_upload_image_asset"));
+    assert(!names.includes("vault_create_note_with_assets"));
+    assert(!names.includes("vault_create_external_reference_note"));
     const response = await rpc(readOnlyPort, { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "vault_write", arguments: { path: "98-Inbox/nope.md", content: "nope" } } });
     assert.equal(response.error?.code, -32601);
   } finally {

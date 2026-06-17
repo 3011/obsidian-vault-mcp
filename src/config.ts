@@ -26,6 +26,12 @@ function tokenFromEnv(): string {
   }
 }
 
+function listEnv(name: string, defaultValue: string[]): string[] {
+  const raw = process.env[name];
+  if (!raw) return defaultValue;
+  return raw.split(",").map((value) => value.trim()).filter(Boolean);
+}
+
 export type Config = {
   host: string;
   port: number;
@@ -50,6 +56,11 @@ export type Config = {
   enableVaultMove: boolean;
   enableAppendToInbox: boolean;
   enableAuditLog: boolean;
+  assetsDirName: string;
+  maxImageAssetBytes: number;
+  allowedImageMimeTypes: string[];
+  enableImageAssets: boolean;
+  enableExternalReferenceNotes: boolean;
 };
 
 export const config: Config = {
@@ -70,7 +81,7 @@ export const config: Config = {
   maxReadBytes: intEnv("MAX_READ_BYTES", 256 * 1024),
   maxSearchBytesPerFile: intEnv("MAX_SEARCH_BYTES_PER_FILE", 256 * 1024),
   maxSearchResults: intEnv("MAX_SEARCH_RESULTS", 100),
-  maxRequestBytes: intEnv("MAX_REQUEST_BYTES", 1024 * 1024),
+  maxRequestBytes: intEnv("MAX_REQUEST_BYTES", 16 * 1024 * 1024),
   readOnly: boolEnv("READ_ONLY", false),
   enableVaultWrite: boolEnv("ENABLE_VAULT_WRITE", true),
   enableVaultAppend: boolEnv("ENABLE_VAULT_APPEND", true),
@@ -78,5 +89,10 @@ export const config: Config = {
   enableVaultDelete: boolEnv("ENABLE_VAULT_DELETE", true),
   enableVaultMove: boolEnv("ENABLE_VAULT_MOVE", true),
   enableAppendToInbox: boolEnv("ENABLE_APPEND_TO_INBOX", true),
-  enableAuditLog: boolEnv("ENABLE_AUDIT_LOG", true)
+  enableAuditLog: boolEnv("ENABLE_AUDIT_LOG", true),
+  assetsDirName: (process.env.ASSETS_DIR_NAME || "assets").replace(/^\/+|\/+$/g, "") || "assets",
+  maxImageAssetBytes: intEnv("MAX_IMAGE_ASSET_BYTES", 10 * 1024 * 1024),
+  allowedImageMimeTypes: listEnv("ALLOWED_IMAGE_MIME_TYPES", ["image/png", "image/jpeg", "image/webp", "image/gif"]),
+  enableImageAssets: boolEnv("ENABLE_IMAGE_ASSETS", true),
+  enableExternalReferenceNotes: boolEnv("ENABLE_EXTERNAL_REFERENCE_NOTES", true)
 };

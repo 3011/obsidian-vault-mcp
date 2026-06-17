@@ -208,6 +208,110 @@ export function buildTools(vault: FsVault): Tool[] {
         const path = await vault.appendInbox(String(args.title ?? ""), String(args.content ?? ""));
         return { message: "OK", path };
       }
+    },
+    {
+      name: "vault_upload_image_asset",
+      title: "Vault Upload Image Asset",
+      description: "Upload a small image asset into the vault and return an Obsidian embed link. Only image assets are accepted.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          filename: { type: "string" },
+          mimeType: { type: "string", enum: ["image/png", "image/jpeg", "image/webp", "image/gif"] },
+          contentBase64: { type: "string" },
+          dir: { type: "string", description: "Optional vault-relative asset directory. Defaults to the inbox assets directory." }
+        },
+        required: ["filename", "mimeType", "contentBase64"],
+        additionalProperties: false
+      },
+      handler: async (args) => {
+        const input: { filename: string; mimeType: string; contentBase64: string; dir?: string } = {
+          filename: String(args.filename ?? ""),
+          mimeType: String(args.mimeType ?? ""),
+          contentBase64: String(args.contentBase64 ?? "")
+        };
+        if (typeof args.dir === "string") input.dir = args.dir;
+        return vault.uploadImageAsset(input);
+      }
+    },
+    {
+      name: "vault_create_note_with_assets",
+      title: "Vault Create Note With Assets",
+      description: "Create a Markdown note and store small image assets beside it, replacing {{asset:n}} placeholders with Obsidian embeds.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          path: mdPath,
+          content: { type: "string" },
+          assets: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                filename: { type: "string" },
+                mimeType: { type: "string", enum: ["image/png", "image/jpeg", "image/webp", "image/gif"] },
+                contentBase64: { type: "string" }
+              },
+              required: ["filename", "mimeType", "contentBase64"],
+              additionalProperties: false
+            }
+          }
+        },
+        required: ["path", "content", "assets"],
+        additionalProperties: false
+      },
+      handler: async (args) => vault.createNoteWithAssets(String(args.path), String(args.content ?? ""), parseImageAssets(args.assets))
+    },
+    {
+      name: "vault_create_external_reference_note",
+      title: "Vault Create External Reference Note",
+      description: "Create a structured Markdown note that references external source files without uploading them into the vault.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          path: mdPath,
+          title: { type: "string" },
+          references: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                label: { type: "string" },
+                location: { type: "string" },
+                type: { type: "string" },
+                note: { type: "string" }
+              },
+              required: ["label", "location"],
+              additionalProperties: false
+            }
+          },
+          summary: { type: "string" },
+          keyFindings: { type: "array", items: { type: "string" } },
+          nextActions: { type: "array", items: { type: "string" } }
+        },
+        required: ["path", "title", "references"],
+        additionalProperties: false
+      },
+      handler: async (args) => {
+        const input: {
+          path: string;
+          title: string;
+          references: Array<{ label: string; location: string; type?: string; note?: string }>;
+          summary?: string;
+          keyFindings?: string[];
+          nextActions?: string[];
+        } = {
+          path: String(args.path),
+          title: String(args.title ?? ""),
+          references: parseExternalReferences(args.references)
+        };
+        if (typeof args.summary === "string") input.summary = args.summary;
+        const keyFindings = parseOptionalStringArray(args.keyFindings, "keyFindings");
+        if (keyFindings) input.keyFindings = keyFindings;
+        const nextActions = parseOptionalStringArray(args.nextActions, "nextActions");
+        if (nextActions) input.nextActions = nextActions;
+        return vault.createExternalReferenceNote(input);
+      }
     }
   ];
   return tools.filter((tool) => toolEnabled(tool.name));
@@ -221,6 +325,9 @@ function toolEnabled(name: string): boolean {
     if (name === "vault_delete") return config.enableVaultDelete;
     if (name === "vault_move") return config.enableVaultMove;
     if (name === "append_to_inbox") return config.enableAppendToInbox;
+    if (name === "vault_upload_image_asset") return config.enableImageAssets;
+    if (name === "vault_create_note_with_assets") return config.enableImageAssets;
+    if (name === "vault_create_external_reference_note") return config.enableExternalReferenceNotes;
     return true;
   }
 
@@ -230,6 +337,46 @@ function toolEnabled(name: string): boolean {
     "vault_patch",
     "vault_delete",
     "vault_move",
-    "append_to_inbox"
+    "append_to_inbox",
+    "vault_upload_image_asset",
+    "vault_create_note_with_assets",
+    "vault_create_external_reference_note"
   ].includes(name);
+}
+
+function parseImageAssets(value: unknown): Array<{ filename: string; mimeType: string; contentBase64: string }> {
+  if (!Array.isArray(value)) throw new Error("assets must be an array");
+  return value.map((item, index) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error(`assets[${index}] must be an object`);
+    const record = item as Record<string, unknown>;
+    return {
+      filename: String(record.filename ?? ""),
+      mimeType: String(record.mimeType ?? ""),
+      contentBase64: String(record.contentBase64 ?? "")
+    };
+  });
+}
+
+function parseExternalReferences(value: unknown): Array<{ label: string; location: string; type?: string; note?: string }> {
+  if (!Array.isArray(value)) throw new Error("references must be an array");
+  return value.map((item, index) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error(`references[${index}] must be an object`);
+    const record = item as Record<string, unknown>;
+    const reference: { label: string; location: string; type?: string; note?: string } = {
+      label: String(record.label ?? ""),
+      location: String(record.location ?? "")
+    };
+    if (typeof record.type === "string") reference.type = record.type;
+    if (typeof record.note === "string") reference.note = record.note;
+    return reference;
+  });
+}
+
+function parseOptionalStringArray(value: unknown, name: string): string[] | undefined {
+  if (value == null) return undefined;
+  if (!Array.isArray(value)) throw new Error(`${name} must be an array`);
+  return value.map((item, index) => {
+    if (typeof item !== "string") throw new Error(`${name}[${index}] must be a string`);
+    return item;
+  });
 }

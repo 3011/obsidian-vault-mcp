@@ -4,7 +4,11 @@ import { buildTools } from "./mcp/tools.js";
 import { McpHandler } from "./mcp/handler.js";
 import { FsVault } from "./vault/FsVault.js";
 
-const vault = new FsVault(config.vaultRoot, config.defaultWriteDir);
+const vault = new FsVault(config.vaultRoot, config.defaultWriteDir, {
+  assetsDirName: config.assetsDirName,
+  maxImageAssetBytes: config.maxImageAssetBytes,
+  allowedImageMimeTypes: config.allowedImageMimeTypes
+});
 await vault.init();
 
 const server = createHttpServer(new McpHandler(buildTools(vault)));
