@@ -7,7 +7,11 @@ import { FsVault } from "./vault/FsVault.js";
 const vault = new FsVault(config.vaultRoot, config.defaultWriteDir, {
   assetsDirName: config.assetsDirName,
   maxImageAssetBytes: config.maxImageAssetBytes,
-  allowedImageMimeTypes: config.allowedImageMimeTypes
+  allowedImageMimeTypes: config.allowedImageMimeTypes,
+  trashDelete: config.trashDelete,
+  trashDir: config.trashDir,
+  backupBeforeWrite: config.backupBeforeWrite,
+  backupDir: config.backupDir
 });
 await vault.init();
 

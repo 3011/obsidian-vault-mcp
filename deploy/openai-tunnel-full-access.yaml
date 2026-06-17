@@ -39,7 +39,7 @@ spec:
         fsGroup: 1000
       containers:
         - name: obsidian-vault-mcp
-          image: ghcr.io/YOUR_ORG/obsidian-vault-mcp:dev
+          image: ghcr.io/3011/obsidian-vault-mcp:main
           imagePullPolicy: Always
           env:
             - name: VAULT_ROOT
@@ -78,12 +78,23 @@ spec:
               value: "true"
             - name: AUDIT_LOG_PATH
               value: /data/audit/obsidian-vault-mcp.audit.log
+            - name: TRASH_DELETE
+              value: "true"
+            - name: TRASH_DIR
+              value: .trash
+            - name: BACKUP_BEFORE_WRITE
+              value: "true"
+            - name: BACKUP_DIR
+              value: .backups
           ports:
             - name: http
               containerPort: 8080
           volumeMounts:
             - name: vault
               mountPath: /data/vault
+            - name: vault
+              mountPath: /data/audit
+              subPath: .audit
           readinessProbe:
             httpGet:
               path: /healthz

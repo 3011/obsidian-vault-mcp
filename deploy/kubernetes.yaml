@@ -37,7 +37,7 @@ spec:
         fsGroup: 1000
       containers:
         - name: obsidian-vault-mcp
-          image: ghcr.io/YOUR_ORG/obsidian-vault-mcp:dev
+          image: ghcr.io/3011/obsidian-vault-mcp:main
           imagePullPolicy: Always
           env:
             - name: VAULT_ROOT

@@ -30,6 +30,11 @@ ALLOWED_IMAGE_MIME_TYPES=image/png,image/jpeg,image/webp,image/gif
 
 ENABLE_AUDIT_LOG=true
 AUDIT_LOG_PATH=/data/audit/obsidian-vault-mcp.audit.log
+
+TRASH_DELETE=true
+TRASH_DIR=.trash
+BACKUP_BEFORE_WRITE=true
+BACKUP_DIR=.backups
 ```
 
 With these settings, every tool is exposed:
@@ -71,6 +76,8 @@ The Service is intentionally `ClusterIP`; it should only be reachable from insid
 ## Operational Notes
 
 This mode is intentionally powerful. The server still blocks path traversal, symlink escape, sensitive vault internals, arbitrary attachment uploads, and non-image asset writes, but GPT can create, overwrite, patch, move, and delete allowed Markdown files and can store small image assets.
+
+Deletes move notes into `.trash/` by default, and existing notes are copied into `.backups/` before write, append, patch, move, and delete operations. Both recovery directories are blocked from MCP note access.
 
 Before using it with a primary vault:
 

@@ -13,9 +13,9 @@ This project is currently usable as an alpha headless filesystem Obsidian Vault 
 ## P0: Data Safety
 
 - [x] Add per-file operation locks for write, append, patch, move, and delete.
-- Add optional backup-before-write mode.
-- Add optional trash mode for delete instead of permanent removal.
-- [x] Add structured audit logs for all mutating tools.
+- [x] Add optional backup-before-write mode.
+- [x] Add optional trash mode for delete instead of permanent removal.
+- [x] Add structured audit logs for all mutating tools, with optional JSONL file output.
 - [x] Add configurable dangerous tool toggles and read-only mode.
 
 ## P1: Markdown Correctness
@@ -47,7 +47,7 @@ This project is currently usable as an alpha headless filesystem Obsidian Vault 
 - [x] Add lint.
 - Add formatting.
 - [x] Add GitHub Actions for typecheck, tests, and Docker build.
-- Add GitHub Actions image publish.
+- [x] Add GitHub Actions image publish to GHCR.
 - Add Dependabot or Renovate config.
 
 ## P2: Open Source Packaging
@@ -57,7 +57,7 @@ This project is currently usable as an alpha headless filesystem Obsidian Vault 
 - [x] Add `CONTRIBUTING.md`.
 - [x] Add `SECURITY.md`.
 - Add release notes and semantic versioning.
-- Publish tagged Docker images instead of only `:dev`.
+- [x] Publish branch, tag, and sha Docker images instead of only `:dev`.
 
 ## Current Next Step
 
@@ -71,4 +71,4 @@ Validated before publish:
 - `npm test`
 - `docker build -t obsidian-vault-mcp:ci .`
 
-The immediate next step is runtime integration validation with the personal full-access tunnel profile: deploy `deploy/openai-tunnel-full-access.yaml`, point the OpenAI tunnel upstream at `http://obsidian-vault-mcp:80/mcp`, and connect ChatGPT. Validate full-access note operations plus image asset note creation. After that, add trash mode and backup-before-write to make full-access destructive tools easier to recover from.
+The immediate next step is runtime integration validation with the personal full-access tunnel profile: deploy `deploy/openai-tunnel-full-access.yaml`, point the OpenAI tunnel upstream at `http://obsidian-vault-mcp:80/mcp`, and connect ChatGPT. Validate full-access note operations, image asset note creation, trash delete, backup-before-write, and audit log persistence.

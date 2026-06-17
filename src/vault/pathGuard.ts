@@ -1,7 +1,7 @@
 import { lstat, mkdir, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 
-const FORBIDDEN_PARTS = new Set([".obsidian", ".livesync", ".git", ".trash", "node_modules"]);
+const FORBIDDEN_PARTS = new Set([".obsidian", ".livesync", ".git", ".trash", ".backups", "node_modules"]);
 const FORBIDDEN_SUFFIXES = [".tmp", ".swp", ".swo"];
 
 export class PathGuard {

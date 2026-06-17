@@ -61,6 +61,11 @@ export type Config = {
   allowedImageMimeTypes: string[];
   enableImageAssets: boolean;
   enableExternalReferenceNotes: boolean;
+  trashDelete: boolean;
+  trashDir: string;
+  backupBeforeWrite: boolean;
+  backupDir: string;
+  auditLogPath: string;
 };
 
 export const config: Config = {
@@ -94,5 +99,10 @@ export const config: Config = {
   maxImageAssetBytes: intEnv("MAX_IMAGE_ASSET_BYTES", 10 * 1024 * 1024),
   allowedImageMimeTypes: listEnv("ALLOWED_IMAGE_MIME_TYPES", ["image/png", "image/jpeg", "image/webp", "image/gif"]),
   enableImageAssets: boolEnv("ENABLE_IMAGE_ASSETS", true),
-  enableExternalReferenceNotes: boolEnv("ENABLE_EXTERNAL_REFERENCE_NOTES", true)
+  enableExternalReferenceNotes: boolEnv("ENABLE_EXTERNAL_REFERENCE_NOTES", true),
+  trashDelete: boolEnv("TRASH_DELETE", true),
+  trashDir: (process.env.TRASH_DIR || ".trash").replace(/^\/+|\/+$/g, "") || ".trash",
+  backupBeforeWrite: boolEnv("BACKUP_BEFORE_WRITE", true),
+  backupDir: (process.env.BACKUP_DIR || ".backups").replace(/^\/+|\/+$/g, "") || ".backups",
+  auditLogPath: (process.env.AUDIT_LOG_PATH || "").trim()
 };

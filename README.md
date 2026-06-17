@@ -78,6 +78,11 @@ MCP_TOKEN=change-me VAULT_ROOT=/tmp/vault npm start
 | `MAX_IMAGE_ASSET_BYTES` | `10485760` | Maximum decoded image asset size. |
 | `ALLOWED_IMAGE_MIME_TYPES` | `image/png,image/jpeg,image/webp,image/gif` | Comma-separated image MIME allowlist. |
 | `ENABLE_AUDIT_LOG` | `true` | Log mutating operations as JSON. |
+| `AUDIT_LOG_PATH` | empty | Optional JSONL audit log file path. Defaults to stdout when empty. |
+| `TRASH_DELETE` | `true` | Move deleted notes into the trash directory instead of permanent deletion. |
+| `TRASH_DIR` | `.trash` | Vault recovery directory for deleted notes. |
+| `BACKUP_BEFORE_WRITE` | `true` | Copy existing notes before write, append, patch, move, and delete operations. |
+| `BACKUP_DIR` | `.backups` | Vault recovery directory for backups. |
 
 ## Safety Model
 
@@ -86,11 +91,12 @@ The server allows destructive tools when enabled, but still enforces baseline fi
 - no absolute paths;
 - no `..` path traversal;
 - no symlink escape from the vault root;
-- no access to `.obsidian/`, `.livesync/`, `.git/`, `.trash/`, or `node_modules/`;
+- no access to `.obsidian/`, `.livesync/`, `.git/`, `.trash/`, `.backups`, or `node_modules/`;
 - no temp/swap files;
 - no arbitrary attachment uploads; only small image assets are accepted as vault files;
 - per-file locks for write, append, patch, move, and delete;
 - atomic writes with temp file, fsync, and rename;
+- default trash deletes and backup-before-write recovery copies;
 - JSON audit logs for mutating operations.
 
 ## Test
@@ -124,9 +130,11 @@ Supported JSON-RPC methods:
 ## Build
 
 ```bash
-docker build -t ghcr.io/YOUR_ORG/obsidian-vault-mcp:dev .
-docker push ghcr.io/YOUR_ORG/obsidian-vault-mcp:dev
+docker build -t ghcr.io/3011/obsidian-vault-mcp:main .
+docker push ghcr.io/3011/obsidian-vault-mcp:main
 ```
+
+GitHub Actions publishes images to `ghcr.io/3011/obsidian-vault-mcp` for pushes to `main` and for git tags. It also publishes immutable `sha-*` tags.
 
 ## Kubernetes Example
 

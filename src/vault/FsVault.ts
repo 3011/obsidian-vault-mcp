@@ -1,6 +1,7 @@
-import { mkdir, readdir, readFile, rename, rm, stat } from "node:fs/promises";
+import { copyFile, mkdir, readdir, readFile, rename, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { atomicWriteFile } from "./atomicWrite.js";
+import { audit } from "./audit.js";
 import { FileLocks } from "./FileLocks.js";
 import { PathGuard } from "./pathGuard.js";
 import { getDocumentMap } from "../markdown/documentMap.js";
@@ -29,12 +30,28 @@ export class FsVault {
   private readonly assetsDirName: string;
   private readonly maxImageAssetBytes: number;
   private readonly allowedImageMimeTypes: string[];
+  private readonly trashDelete: boolean;
+  private readonly trashDir: string;
+  private readonly backupBeforeWrite: boolean;
+  private readonly backupDir: string;
 
-  constructor(root: string, defaultWriteDir: string, options: { assetsDirName?: string; maxImageAssetBytes?: number; allowedImageMimeTypes?: string[] } = {}) {
+  constructor(root: string, defaultWriteDir: string, options: {
+    assetsDirName?: string;
+    maxImageAssetBytes?: number;
+    allowedImageMimeTypes?: string[];
+    trashDelete?: boolean;
+    trashDir?: string;
+    backupBeforeWrite?: boolean;
+    backupDir?: string;
+  } = {}) {
     this.guard = new PathGuard(root, defaultWriteDir);
     this.assetsDirName = sanitizeDirName(options.assetsDirName || "assets");
     this.maxImageAssetBytes = options.maxImageAssetBytes || 10 * 1024 * 1024;
     this.allowedImageMimeTypes = options.allowedImageMimeTypes || ["image/png", "image/jpeg", "image/webp", "image/gif"];
+    this.trashDelete = options.trashDelete ?? true;
+    this.trashDir = sanitizeDirName(options.trashDir || ".trash");
+    this.backupBeforeWrite = options.backupBeforeWrite ?? true;
+    this.backupDir = sanitizeDirName(options.backupDir || ".backups");
   }
 
   async init(): Promise<void> {
@@ -49,7 +66,7 @@ export class FsVault {
       throw error;
     });
     return entries
-      .filter((entry) => !entry.name.startsWith(".") || ![".obsidian", ".livesync", ".git", ".trash"].includes(entry.name))
+      .filter((entry) => !entry.name.startsWith("."))
       .filter((entry) => entry.isDirectory() || (entry.isFile() && entry.name.endsWith(".md")))
       .map((entry) => entry.isDirectory() ? `${entry.name}/` : entry.name)
       .sort();
@@ -78,9 +95,15 @@ export class FsVault {
   async write(filePath: string, content: string): Promise<void> {
     const relative = this.guard.validateFilePath(filePath, { allowMissing: true });
     await this.locks.withLock([relative], async () => {
-      const absolute = this.guard.resolveCreate(relative);
-      await atomicWriteFile(absolute, content);
-      audit("vault_write", { path: relative, bytes: Buffer.byteLength(content) });
+      try {
+        const absolute = this.guard.resolveCreate(relative);
+        await this.backupExisting(relative, "vault_write");
+        await atomicWriteFile(absolute, content);
+        await audit("vault_write", "success", { path: relative, bytes: Buffer.byteLength(content) });
+      } catch (error) {
+        await audit("vault_write", "failure", { path: relative, error: errorMessage(error) });
+        throw error;
+      }
     });
   }
 
@@ -95,8 +118,14 @@ export class FsVault {
         if (error?.code !== "ENOENT") throw error;
       }
       const next = existing.length === 0 ? content : `${existing.endsWith("\n") ? existing : `${existing}\n`}${content}`;
-      await atomicWriteFile(absolute, next);
-      audit("vault_append", { path: relative, bytes: Buffer.byteLength(content) });
+      try {
+        await this.backupExisting(relative, "vault_append");
+        await atomicWriteFile(absolute, next);
+        await audit("vault_append", "success", { path: relative, bytes: Buffer.byteLength(content) });
+      } catch (error) {
+        await audit("vault_append", "failure", { path: relative, error: errorMessage(error) });
+        throw error;
+      }
     });
   }
 
@@ -123,12 +152,18 @@ export class FsVault {
 
     return this.locks.withLock([relative], async () => {
       const savedAssets: ImageAssetResult[] = [];
-      for (const asset of prepared) savedAssets.push(await this.savePreparedImageAsset(assetDir, asset));
-      const noteContent = renderNoteWithAssets(content, savedAssets);
-      const absolute = this.guard.resolveCreate(relative);
-      await atomicWriteFile(absolute, noteContent);
-      audit("vault_create_note_with_assets", { path: relative, assets: savedAssets.map((asset) => asset.path), bytes: Buffer.byteLength(noteContent) });
-      return { path: relative, assets: savedAssets };
+      try {
+        for (const asset of prepared) savedAssets.push(await this.savePreparedImageAsset(assetDir, asset));
+        const noteContent = renderNoteWithAssets(content, savedAssets);
+        const absolute = this.guard.resolveCreate(relative);
+        await this.backupExisting(relative, "vault_create_note_with_assets");
+        await atomicWriteFile(absolute, noteContent);
+        await audit("vault_create_note_with_assets", "success", { path: relative, assets: savedAssets.map((asset) => asset.path), bytes: Buffer.byteLength(noteContent) });
+        return { path: relative, assets: savedAssets };
+      } catch (error) {
+        await audit("vault_create_note_with_assets", "failure", { path: relative, assets: savedAssets.map((asset) => asset.path), error: errorMessage(error) });
+        throw error;
+      }
     });
   }
 
@@ -148,27 +183,52 @@ export class FsVault {
       if (!reference.location.trim()) throw new Error("reference location is required");
     }
     const content = renderExternalReferenceNote(args);
-    await this.write(relative, content);
-    audit("vault_create_external_reference_note", { path: relative, references: args.references.length });
-    return { path: relative };
+    try {
+      await this.write(relative, content);
+      await audit("vault_create_external_reference_note", "success", { path: relative, references: args.references.length });
+      return { path: relative };
+    } catch (error) {
+      await audit("vault_create_external_reference_note", "failure", { path: relative, references: args.references.length, error: errorMessage(error) });
+      throw error;
+    }
   }
 
   async patch(filePath: string, args: PatchArgs): Promise<void> {
     const relative = this.guard.validateFilePath(filePath);
     await this.locks.withLock([relative], async () => {
-      const absolute = await this.guard.resolveExisting(relative);
-      const content = await readFile(absolute, "utf8");
-      await atomicWriteFile(absolute, patchMarkdown(content, args));
-      audit("vault_patch", { path: relative, targetType: args.targetType, target: args.target, operation: args.operation });
+      try {
+        const absolute = await this.guard.resolveExisting(relative);
+        const content = await readFile(absolute, "utf8");
+        await this.backupExisting(relative, "vault_patch");
+        await atomicWriteFile(absolute, patchMarkdown(content, args));
+        await audit("vault_patch", "success", { path: relative, targetType: args.targetType, target: args.target, operation: args.operation });
+      } catch (error) {
+        await audit("vault_patch", "failure", { path: relative, targetType: args.targetType, target: args.target, operation: args.operation, error: errorMessage(error) });
+        throw error;
+      }
     });
   }
 
   async delete(filePath: string): Promise<void> {
     const relative = this.guard.validateFilePath(filePath);
     await this.locks.withLock([relative], async () => {
-      const absolute = await this.guard.resolveExisting(relative);
-      await rm(absolute);
-      audit("vault_delete", { path: relative });
+      try {
+        const absolute = await this.guard.resolveExisting(relative);
+        await this.backupExisting(relative, "vault_delete");
+        if (this.trashDelete) {
+          const trashRelative = await this.allocateRecoveryPath(this.trashDir, relative, "vault_delete");
+          const trashAbsolute = this.guard.resolveCreate(trashRelative);
+          await mkdir(path.dirname(trashAbsolute), { recursive: true });
+          await rename(absolute, trashAbsolute);
+          await audit("vault_delete", "success", { path: relative, trashPath: trashRelative });
+        } else {
+          await rm(absolute);
+          await audit("vault_delete", "success", { path: relative, permanent: true });
+        }
+      } catch (error) {
+        await audit("vault_delete", "failure", { path: relative, error: errorMessage(error) });
+        throw error;
+      }
     });
   }
 
@@ -176,21 +236,28 @@ export class FsVault {
     const sourceRelative = this.guard.validateFilePath(filePath);
     const destinationRelative = this.guard.validateDestination(destination, sourceRelative);
     return this.locks.withLock([sourceRelative, destinationRelative], async () => {
-      const sourceAbsolute = await this.guard.resolveExisting(sourceRelative);
-      const destinationAbsolute = this.guard.resolveCreate(destinationRelative);
-      if (!allowOverwrite) {
-        try {
-          await stat(destinationAbsolute);
-          throw new Error(`destination already exists: ${destinationRelative}`);
-        } catch (error: any) {
-          if (error?.code !== "ENOENT") throw error;
+      try {
+        const sourceAbsolute = await this.guard.resolveExisting(sourceRelative);
+        const destinationAbsolute = this.guard.resolveCreate(destinationRelative);
+        if (!allowOverwrite) {
+          try {
+            await stat(destinationAbsolute);
+            throw new Error(`destination already exists: ${destinationRelative}`);
+          } catch (error: any) {
+            if (error?.code !== "ENOENT") throw error;
+          }
         }
+        await this.backupExisting(sourceRelative, "vault_move");
+        if (allowOverwrite) await this.backupExisting(destinationRelative, "vault_move_overwrite");
+        await mkdir(path.dirname(destinationAbsolute), { recursive: true });
+        if (allowOverwrite) await rm(destinationAbsolute, { force: true });
+        await rename(sourceAbsolute, destinationAbsolute);
+        await audit("vault_move", "success", { path: sourceRelative, destination: destinationRelative, allowOverwrite });
+        return destinationRelative;
+      } catch (error) {
+        await audit("vault_move", "failure", { path: sourceRelative, destination: destinationRelative, allowOverwrite, error: errorMessage(error) });
+        throw error;
       }
-      await mkdir(path.dirname(destinationAbsolute), { recursive: true });
-      if (allowOverwrite) await rm(destinationAbsolute, { force: true });
-      await rename(sourceAbsolute, destinationAbsolute);
-      audit("vault_move", { path: sourceRelative, destination: destinationRelative, allowOverwrite });
-      return destinationRelative;
     });
   }
 
@@ -265,16 +332,21 @@ export class FsVault {
     });
     const relative = this.guard.validateAssetPath(`${dir}/${filename}`, allowedExtensions);
     return this.locks.withLock([relative], async () => {
-      const absolute = this.guard.resolveCreate(relative);
-      await atomicWriteFile(absolute, asset.bytes);
-      audit("vault_upload_image_asset", { path: relative, bytes: asset.byteLength, sha256: asset.sha256, mimeType: asset.mimeType });
-      return {
-        path: relative,
-        embed: `![[${relative}]]`,
-        bytes: asset.byteLength,
-        sha256: asset.sha256,
-        mimeType: asset.mimeType
-      };
+      try {
+        const absolute = this.guard.resolveCreate(relative);
+        await atomicWriteFile(absolute, asset.bytes);
+        await audit("vault_upload_image_asset", "success", { path: relative, bytes: asset.byteLength, sha256: asset.sha256, mimeType: asset.mimeType });
+        return {
+          path: relative,
+          embed: `![[${relative}]]`,
+          bytes: asset.byteLength,
+          sha256: asset.sha256,
+          mimeType: asset.mimeType
+        };
+      } catch (error) {
+        await audit("vault_upload_image_asset", "failure", { path: relative, bytes: asset.byteLength, sha256: asset.sha256, mimeType: asset.mimeType, error: errorMessage(error) });
+        throw error;
+      }
     });
   }
 
@@ -282,6 +354,40 @@ export class FsVault {
     if (path.posix.basename(assetDir) !== this.assetsDirName) {
       throw new Error(`image assets must be stored in a '${this.assetsDirName}' directory`);
     }
+  }
+
+  private async backupExisting(relative: string, operation: string): Promise<string | undefined> {
+    if (!this.backupBeforeWrite) return undefined;
+    const source = this.guard.resolveCreate(relative);
+    try {
+      await stat(source);
+    } catch (error: any) {
+      if (error?.code === "ENOENT") return undefined;
+      throw error;
+    }
+    const backupRelative = await this.allocateRecoveryPath(this.backupDir, relative, operation);
+    const backupAbsolute = this.guard.resolveCreate(backupRelative);
+    await mkdir(path.dirname(backupAbsolute), { recursive: true });
+    await copyFile(source, backupAbsolute);
+    await audit("vault_backup", "success", { path: relative, backupPath: backupRelative, operation });
+    return backupRelative;
+  }
+
+  private async allocateRecoveryPath(baseDir: string, relative: string, operation: string): Promise<string> {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const parsed = path.posix.parse(relative);
+    const safeOperation = operation.replace(/[^a-z0-9_-]/gi, "-");
+    const baseRelative = `${baseDir}/${timestamp}/${parsed.dir}/${parsed.name}.${safeOperation}${parsed.ext}`.replace(/\/+/g, "/");
+    for (let index = 0; index < 1000; index += 1) {
+      const candidate = index === 0 ? baseRelative : baseRelative.replace(new RegExp(`${escapeRegExp(parsed.ext)}$`), `.${index}${parsed.ext}`);
+      try {
+        await stat(this.guard.resolveCreate(candidate));
+      } catch (error: any) {
+        if (error?.code === "ENOENT") return candidate;
+        throw error;
+      }
+    }
+    throw new Error(`could not allocate recovery path for ${relative}`);
   }
 
   private readTarget(content: string, targetType: string, target: string, targetDelimiter = "::"): unknown {
@@ -404,13 +510,10 @@ function expandTag(tag: string): string[] {
   return names.filter(Boolean);
 }
 
-function audit(tool: string, details: Record<string, unknown>): void {
-  if (process.env.ENABLE_AUDIT_LOG === "false") return;
-  console.log(JSON.stringify({
-    level: "info",
-    event: "vault_mutation",
-    tool,
-    ...details,
-    timestamp: new Date().toISOString()
-  }));
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
