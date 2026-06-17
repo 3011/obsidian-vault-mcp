@@ -71,4 +71,4 @@ Validated before publish:
 - `npm test`
 - `docker build -t obsidian-vault-mcp:ci .`
 
-The immediate next step is runtime integration validation: deploy behind HTTPS, validate with MCP Inspector, and connect ChatGPT Connector to the public `/mcp` endpoint. After that, add trash mode and backup-before-write before relying on destructive tools against a primary vault.
+The immediate next step is runtime integration validation with the personal full-access tunnel profile: deploy `deploy/openai-tunnel-full-access.yaml`, point the OpenAI tunnel upstream at `http://obsidian-vault-mcp:80/mcp`, and connect ChatGPT. After that, add trash mode and backup-before-write to make full-access destructive tools easier to recover from.

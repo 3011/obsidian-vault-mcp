@@ -126,3 +126,20 @@ kubectl -n YOUR_NAMESPACE create secret generic obsidian-vault-mcp-token \
 kubectl apply -f deploy/kubernetes.yaml
 kubectl -n YOUR_NAMESPACE rollout status deploy/obsidian-vault-mcp
 ```
+
+## Personal Full-Access Tunnel
+
+For pure personal use where ChatGPT is intentionally allowed to use every vault tool, use the full-access tunnel profile:
+
+```bash
+kubectl apply -f deploy/openai-tunnel-full-access.yaml
+kubectl -n YOUR_NAMESPACE rollout status deploy/obsidian-vault-mcp
+```
+
+This profile sets `MCP_REQUIRE_TOKEN=false`, `READ_ONLY=false`, and enables write, append, patch, delete, move, and inbox append tools. It assumes the MCP server is only reachable through a private tunnel such as OpenAI Secure MCP Tunnel, with the tunnel upstream pointed at:
+
+```text
+http://obsidian-vault-mcp:80/mcp
+```
+
+See `docs/personal-full-access.md` before using this profile with a primary vault.
