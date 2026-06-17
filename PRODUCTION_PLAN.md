@@ -61,4 +61,14 @@ This project is currently usable as an alpha headless filesystem Obsidian Vault 
 
 ## Current Next Step
 
-The immediate next step is a publish pass: run full tests in a non-sandboxed environment, initialize the GitHub repository, push the sanitized alpha source, and then add trash/backup modes before publishing beyond alpha.
+The sanitized alpha source has been published to `git@github.com:3011/obsidian-vault-mcp.git` on `main`.
+
+Validated before publish:
+
+- `npm ci`
+- `npm run lint`
+- `npm run typecheck`
+- `npm test`
+- `docker build -t obsidian-vault-mcp:ci .`
+
+The immediate next step is runtime integration validation: deploy behind HTTPS, validate with MCP Inspector, and connect ChatGPT Connector to the public `/mcp` endpoint. After that, add trash mode and backup-before-write before relying on destructive tools against a primary vault.
