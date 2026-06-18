@@ -21,6 +21,7 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: docker build -t obsidian-vault-mcp:ci .
+      - run: docker run --rm obsidian-vault-mcp:ci node -e "import('markdown-patch').then(() => import('yaml'))"
 
   publish:
     needs: test
