@@ -142,6 +142,7 @@ GitHub Actions publishes images to `ghcr.io/3011/obsidian-vault-mcp` for pushes 
 ## Kubernetes Example
 
 Split manifests and Chinese deployment notes are available under `deploy/`; see `deploy/README.zh-CN.md`.
+For the recommended LiveSync + MCP + private tunnel topology, see `docs/deployment-architecture.md`.
 
 ```bash
 kubectl -n YOUR_NAMESPACE create secret generic obsidian-vault-mcp-token \
@@ -169,4 +170,4 @@ http://obsidian-vault-mcp:80/mcp
 
 See `docs/personal-full-access.md` before using this profile with a primary vault.
 
-Runtime validation completed in a k3s dev profile with LiveSync CLI, CouchDB, OpenAI Secure MCP Tunnel, and ChatGPT Connector. The ChatGPT-side tunnel matrix passed for `vault_list`, `vault_read`, `vault_write`, `vault_append`, `vault_patch`, `vault_delete`, `vault_move`, `search_simple`, `tag_list`, `append_to_inbox`, `vault_upload_image_asset`, `vault_create_note_with_assets`, and `vault_create_external_reference_note`.
+Runtime validation completed in a private k3s profile with LiveSync CLI, CouchDB, OpenAI Secure MCP Tunnel, and ChatGPT Connector. The ChatGPT-side tunnel matrix passed for `vault_list`, `vault_read`, `vault_write`, `vault_append`, `vault_patch`, `vault_delete`, `vault_move`, `search_simple`, `tag_list`, `append_to_inbox`, `vault_upload_image_asset`, `vault_create_note_with_assets`, and `vault_create_external_reference_note`.

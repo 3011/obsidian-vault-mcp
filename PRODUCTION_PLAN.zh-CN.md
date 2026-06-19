@@ -44,7 +44,7 @@
 
 ## P1：LiveSync 运行时集成
 
-- [x] 构建并 smoke-test LiveSync CLI 镜像：`10.10.0.1:30500/obsidian-livesync-cli:pin-20260618`。
+- [x] 构建并 smoke-test 固定版本的 LiveSync CLI 镜像。
 - [x] 使用隔离 CouchDB 数据库和隔离 CouchDB 用户验证 LiveSync CLI。
 - [x] 验证 `put -> sync -> sync -> mirror -> /vault Markdown` one-shot flow。
 - [x] 使用共享测试 vault PVC 验证 LiveSync daemon。
@@ -87,14 +87,14 @@
 
 运行时验证状态：
 
-- MCP full-access/noauth deployment 已在 k3s `dev` 验证。
+- MCP full-access/noauth deployment 已在私有 k3s 环境验证。
 - Trash delete、backup-before-write、image asset tools、external reference notes、file audit logging 已验证。
 - 曾用 Cloudflare quick tunnel 验证到 `/mcp` 的临时 HTTPS tunnel 连通性，之后已移除。
 - LiveSync 已使用隔离测试资源验证，包括完整 MCP-to-CouchDB roundtrip。
-- OpenAI Secure MCP Tunnel doctor 已针对 `obsidian-vault-mcp-livesync-test.dev.svc.cluster.local/mcp` 验证。
-- 长运行 `openai-mcp-tunnel-client` Deployment 正在 k3s `dev` 中运行；ChatGPT-side connector validation 已通过。
-- 当前网络中，k3s tunnel-client pod 需要 `CONTROL_PLANE_HTTP_PROXY=http://10.10.0.1:30800` 才能访问 OpenAI control-plane。MCP 到集群内 Service 的流量仍保持 direct。
-- 已纳入仓库的 dev k3s profile 已更新为验证过的 Node MCP + LiveSync polling + OpenAI Secure MCP Tunnel 架构，并且剩余 MCP 工具矩阵已通过直接 k3s MCP 验证。
+- OpenAI Secure MCP Tunnel doctor 已针对集群内 MCP Service URL 验证。
+- 长运行 tunnel-client Deployment 已在 k3s 验证；ChatGPT-side connector validation 已通过。
+- 已验证的网络模式是：MCP 到集群内 Service 的流量保持 direct。如果集群访问 tunnel control-plane 需要 outbound proxy，应在公开仓库外配置该值。
+- 已纳入仓库的 k3s profile 已更新为验证过的 Node MCP + LiveSync polling + private tunnel 架构，并且剩余 MCP 工具矩阵已通过直接 k3s MCP 验证。
 - ChatGPT 网页通过 `tunnel` MCP connector 已验证 `vault_append`、`vault_patch`、`vault_move`、`search_simple`、`tag_list`、`append_to_inbox`、`vault_upload_image_asset`、`vault_create_note_with_assets`、`vault_create_external_reference_note`。
 
-下一步是把已验证的 dev profile 推向生产：从本地 `:dev` 镜像切换到不可变 GHCR tag 或 digest，轮换 OpenAI runtime key，从 `.trash/` 和 `.backups/` 做恢复演练，然后在备份正式 LiveSync 数据库后规划从隔离测试数据库切换到真实 vault 数据库。
+下一步是把已验证的私有 profile 推向生产：从本地开发镜像切换到不可变 GHCR tag 或 digest，轮换 runtime keys，从 `.trash/` 和 `.backups/` 做恢复演练，然后在备份正式 LiveSync 数据库后规划从隔离测试数据库切换到真实 vault 数据库。

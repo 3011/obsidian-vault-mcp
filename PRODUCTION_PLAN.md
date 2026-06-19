@@ -44,7 +44,7 @@ This project is currently usable as an alpha headless filesystem Obsidian Vault 
 
 ## P1: LiveSync Runtime Integration
 
-- [x] Build and smoke-test a LiveSync CLI image: `10.10.0.1:30500/obsidian-livesync-cli:pin-20260618`.
+- [x] Build and smoke-test a pinned LiveSync CLI image.
 - [x] Validate LiveSync CLI against an isolated CouchDB database and isolated CouchDB user.
 - [x] Validate `put -> sync -> sync -> mirror -> /vault Markdown` one-shot flow.
 - [x] Validate LiveSync daemon with a shared test vault PVC.
@@ -87,14 +87,14 @@ Validated before publish:
 
 Runtime validation status:
 
-- MCP full-access/noauth deployment has been validated in k3s `dev`.
+- MCP full-access/noauth deployment has been validated in a private k3s environment.
 - Trash delete, backup-before-write, image asset tools, external reference notes, and file audit logging have been validated.
 - Temporary HTTPS tunnel connectivity to `/mcp` has been validated with a Cloudflare quick tunnel and then removed.
 - LiveSync has been validated against isolated test resources, including a full MCP-to-CouchDB roundtrip.
-- OpenAI Secure MCP Tunnel doctor has been validated against `obsidian-vault-mcp-livesync-test.dev.svc.cluster.local/mcp`.
-- A long-running `openai-mcp-tunnel-client` Deployment is running in k3s `dev`; ChatGPT-side connector validation has passed.
-- The k3s tunnel-client pod needs `CONTROL_PLANE_HTTP_PROXY=http://10.10.0.1:30800` for OpenAI control-plane egress in the current network. MCP traffic to the in-cluster Service remains direct.
-- The checked-in dev k3s profile has been updated to the validated Node MCP + LiveSync polling + OpenAI Secure MCP Tunnel architecture, and the remaining MCP tool matrix has passed direct k3s MCP validation.
+- OpenAI Secure MCP Tunnel doctor has been validated against an in-cluster MCP Service URL.
+- A long-running tunnel-client Deployment has been validated in k3s; ChatGPT-side connector validation has passed.
+- The validated network pattern keeps MCP traffic to the in-cluster Service direct. If a cluster needs outbound proxy access for the tunnel control plane, configure that value outside the public repository.
+- The checked-in k3s profile has been updated to the validated Node MCP + LiveSync polling + private tunnel architecture, and the remaining MCP tool matrix has passed direct k3s MCP validation.
 - ChatGPT web testing through the `tunnel` MCP connector passed for `vault_append`, `vault_patch`, `vault_move`, `search_simple`, `tag_list`, `append_to_inbox`, `vault_upload_image_asset`, `vault_create_note_with_assets`, and `vault_create_external_reference_note`.
 
-The immediate next step is to promote the validated dev profile toward production: switch from local `:dev` images to immutable GHCR tags or digests, rotate the OpenAI runtime key, perform a restore drill from `.trash/` and `.backups/`, then plan the cutover from the isolated LiveSync test database to the real vault database with a backup.
+The immediate next step is to promote the validated private profile toward production: switch from local development images to immutable GHCR tags or digests, rotate runtime keys, perform a restore drill from `.trash/` and `.backups/`, then plan the cutover from the isolated LiveSync test database to the real vault database with a backup.
