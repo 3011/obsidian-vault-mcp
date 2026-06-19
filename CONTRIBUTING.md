@@ -1,5 +1,7 @@
 # Contributing
 
+[中文文档](CONTRIBUTING.zh-CN.md)
+
 ## Development
 
 Use Node.js 22 or newer.

@@ -1,5 +1,7 @@
 # Production Readiness Plan
 
+[中文文档](PRODUCTION_PLAN.zh-CN.md)
+
 This project is currently usable as an alpha headless filesystem Obsidian Vault MCP server. The goal is to make it safe to publish and operate as a production-grade open source project.
 
 ## P0: Protocol Compatibility

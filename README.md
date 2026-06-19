@@ -1,5 +1,7 @@
 # Obsidian Vault MCP
 
+[中文文档](README.zh-CN.md)
+
 Headless Obsidian Vault MCP server backed by a normal Markdown vault directory.
 
 It is designed for:

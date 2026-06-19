@@ -1,5 +1,7 @@
 # Personal Full-Access Tunnel Profile
 
+[中文文档](personal-full-access.zh-CN.md)
+
 This profile is for a single operator who intentionally gives ChatGPT full access to a private Obsidian vault through OpenAI Secure MCP Tunnel or another private tunnel.
 
 It disables MCP server authentication because the tunnel is the network trust boundary:

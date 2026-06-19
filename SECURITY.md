@@ -1,5 +1,7 @@
 # Security Policy
 
+[中文文档](SECURITY.zh-CN.md)
+
 ## Supported Versions
 
 Security fixes are currently handled on the `main` branch until the project starts publishing tagged releases.
