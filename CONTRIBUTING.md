@@ -23,7 +23,7 @@ npm run test:sdk
 
 ## Pull Requests
 
-Keep changes scoped, include tests for behavior changes, and avoid committing vault data, tokens, private hostnames, kubeconfig content, or local deployment values.
+Keep changes scoped and include tests for behavior changes.
 
 Before opening a pull request, run:
 

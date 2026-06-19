@@ -2,7 +2,7 @@
 
 [English](deployment-architecture.md)
 
-本文档描述推荐的生产化部署模式，不包含任何特定环境的私有值。
+本文档描述推荐的生产化部署模式。
 
 ## 推荐拓扑
 
@@ -69,17 +69,11 @@ http://obsidian-vault-mcp.YOUR_NAMESPACE.svc.cluster.local/mcp
 
 如果 Kubernetes 集群访问公网需要 outbound proxy，并且 tunnel client 支持按 route 配置 proxy，建议只给 tunnel control-plane 流量配置 proxy。到集群内 MCP Service 的流量应保持 direct。
 
-## Secret
-
-不要提交真实 secret。
-
-常见 secret：
+## Secret 输入
 
 - CouchDB URL、数据库名、用户名、密码、LiveSync 加密 passphrase；
 - default profile 使用的 MCP bearer token；
 - tunnel runtime API key 和 tunnel identifier。
-
-仓库示例只使用占位符。
 
 ## 数据安全
 

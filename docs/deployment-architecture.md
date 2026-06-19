@@ -2,7 +2,7 @@
 
 [中文文档](deployment-architecture.zh-CN.md)
 
-This document describes the recommended production-style deployment pattern without environment-specific values.
+This document describes the recommended production-style deployment pattern.
 
 ## Recommended Topology
 
@@ -69,17 +69,11 @@ http://obsidian-vault-mcp.YOUR_NAMESPACE.svc.cluster.local/mcp
 
 If the Kubernetes cluster requires an outbound proxy for internet access, configure that proxy only for the tunnel control-plane traffic when the tunnel client supports per-route proxy settings. Keep traffic to the in-cluster MCP Service direct.
 
-## Secrets
-
-Do not commit real secrets.
-
-Typical secrets:
+## Secret Inputs
 
 - CouchDB URL, database name, username, password, and LiveSync encryption passphrase.
 - MCP bearer token for the default profile.
 - Tunnel runtime API key and tunnel identifier.
-
-The repository examples use placeholders only.
 
 ## Data Safety
 

@@ -10,8 +10,6 @@ Security fixes are currently handled on the `main` branch until the project star
 
 Please report vulnerabilities privately to the repository owner before opening a public issue.
 
-Do not include vault content, bearer tokens, cluster hostnames, private IPs, or other secrets in reports unless explicitly requested through a private channel.
-
 ## Deployment Notes
 
 Run the service behind HTTPS when it is reachable outside a trusted network, set a strong `MCP_TOKEN`, and keep `MCP_REQUIRE_TOKEN=true`.

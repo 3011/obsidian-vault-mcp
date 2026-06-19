@@ -75,7 +75,7 @@
 
 ## 当前下一步
 
-已清理隐私信息的 alpha 源码已经发布到 `git@github.com:3011/obsidian-vault-mcp.git` 的 `main` 分支。
+alpha 源码已经发布到 `git@github.com:3011/obsidian-vault-mcp.git` 的 `main` 分支。
 
 发布前已验证：
 
@@ -93,7 +93,7 @@
 - LiveSync 已使用隔离测试资源验证，包括完整 MCP-to-CouchDB roundtrip。
 - OpenAI Secure MCP Tunnel doctor 已针对集群内 MCP Service URL 验证。
 - 长运行 tunnel-client Deployment 已在 k3s 验证；ChatGPT-side connector validation 已通过。
-- 已验证的网络模式是：MCP 到集群内 Service 的流量保持 direct。如果集群访问 tunnel control-plane 需要 outbound proxy，应在公开仓库外配置该值。
+- 已验证的网络模式是：MCP 到集群内 Service 的流量保持 direct。如果集群访问 tunnel control-plane 需要 outbound proxy，应在运行环境中配置该值。
 - 已纳入仓库的 k3s profile 已更新为验证过的 Node MCP + LiveSync polling + private tunnel 架构，并且剩余 MCP 工具矩阵已通过直接 k3s MCP 验证。
 - ChatGPT 网页通过 `tunnel` MCP connector 已验证 `vault_append`、`vault_patch`、`vault_move`、`search_simple`、`tag_list`、`append_to_inbox`、`vault_upload_image_asset`、`vault_create_note_with_assets`、`vault_create_external_reference_note`。
 

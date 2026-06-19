@@ -75,7 +75,7 @@ This project is currently usable as an alpha headless filesystem Obsidian Vault 
 
 ## Current Next Step
 
-The sanitized alpha source has been published to `git@github.com:3011/obsidian-vault-mcp.git` on `main`.
+The alpha source has been published to `git@github.com:3011/obsidian-vault-mcp.git` on `main`.
 
 Validated before publish:
 
@@ -93,7 +93,7 @@ Runtime validation status:
 - LiveSync has been validated against isolated test resources, including a full MCP-to-CouchDB roundtrip.
 - OpenAI Secure MCP Tunnel doctor has been validated against an in-cluster MCP Service URL.
 - A long-running tunnel-client Deployment has been validated in k3s; ChatGPT-side connector validation has passed.
-- The validated network pattern keeps MCP traffic to the in-cluster Service direct. If a cluster needs outbound proxy access for the tunnel control plane, configure that value outside the public repository.
+- The validated network pattern keeps MCP traffic to the in-cluster Service direct. If a cluster needs outbound proxy access for the tunnel control plane, configure that value in the runtime environment.
 - The checked-in k3s profile has been updated to the validated Node MCP + LiveSync polling + private tunnel architecture, and the remaining MCP tool matrix has passed direct k3s MCP validation.
 - ChatGPT web testing through the `tunnel` MCP connector passed for `vault_append`, `vault_patch`, `vault_move`, `search_simple`, `tag_list`, `append_to_inbox`, `vault_upload_image_asset`, `vault_create_note_with_assets`, and `vault_create_external_reference_note`.
 

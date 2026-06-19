@@ -23,7 +23,7 @@ npm run test:sdk
 
 ## Pull Request
 
-请保持改动范围清晰，行为变更需要补测试。不要提交 vault 数据、token、私有主机名、kubeconfig 内容或本地部署参数。
+请保持改动范围清晰，行为变更需要补测试。
 
 提交 PR 前请运行：
 
