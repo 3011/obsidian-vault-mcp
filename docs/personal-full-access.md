@@ -89,4 +89,4 @@ Before using it with a primary vault:
 - use `vault_create_note_with_assets` only for screenshots, diagrams, and other small images that belong in the note;
 - review destructive tool calls carefully in the ChatGPT UI when confirmation is shown.
 
-The next hardening features for this profile are trash mode for delete and backup-before-write for mutating tools.
+Validated k3s + ChatGPT tunnel coverage includes list, read, write, append, patch, delete, move, search, tag listing, inbox append, image asset upload, note creation with assets, and external reference note creation. Before cutting over a primary vault, still run a restore drill from `.trash/` and `.backups/` and rotate any runtime API key that was exposed during testing.

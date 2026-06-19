@@ -119,6 +119,7 @@ Tested with:
 - `@modelcontextprotocol/sdk` `^1.29.0`
 - Streamable HTTP client transport
 - Bearer token authentication
+- OpenAI Secure MCP Tunnel with ChatGPT Connector in a personal full-access k3s deployment
 
 Supported JSON-RPC methods:
 
@@ -163,3 +164,5 @@ http://obsidian-vault-mcp:80/mcp
 ```
 
 See `docs/personal-full-access.md` before using this profile with a primary vault.
+
+Runtime validation completed in a k3s dev profile with LiveSync CLI, CouchDB, OpenAI Secure MCP Tunnel, and ChatGPT Connector. The ChatGPT-side tunnel matrix passed for `vault_list`, `vault_read`, `vault_write`, `vault_append`, `vault_patch`, `vault_delete`, `vault_move`, `search_simple`, `tag_list`, `append_to_inbox`, `vault_upload_image_asset`, `vault_create_note_with_assets`, and `vault_create_external_reference_note`.

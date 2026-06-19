@@ -56,6 +56,7 @@ child.stderr.on("data", (chunk) => { stderr += String(chunk); });
 try {
   await waitForHealth(port);
   await testAuth(port);
+  await testWellKnownMetadata(port);
   await testToolDiscovery(port);
   await testRequestBodyLimit(port);
   await testVaultList(port);
@@ -80,6 +81,33 @@ async function testAuth(port: number): Promise<void> {
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} })
   });
   assert.equal(res.status, 401);
+}
+
+async function testWellKnownMetadata(port: number): Promise<void> {
+  for (const pathname of ["/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp"]) {
+    const res = await fetch(`http://127.0.0.1:${port}${pathname}`);
+    assert.equal(res.status, 200);
+    const body = await res.json() as any;
+    assert.equal(typeof body.resource, "string");
+  }
+
+  const noAuthPort = port + 3000;
+  const noAuthChild = spawn(process.execPath, ["dist/src/server.js"], {
+    cwd: projectRoot,
+    env: { ...process.env, MCP_HOST: "127.0.0.1", MCP_PORT: String(noAuthPort), MCP_REQUIRE_TOKEN: "false", VAULT_ROOT: vault },
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  try {
+    await waitForHealth(noAuthPort);
+    for (const pathname of ["/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp"]) {
+      const res = await fetch(`http://127.0.0.1:${noAuthPort}${pathname}`);
+      assert.equal(res.status, 200);
+      const body = await res.json() as any;
+      assert.equal(typeof body.resource, "string");
+    }
+  } finally {
+    noAuthChild.kill("SIGTERM");
+  }
 }
 
 async function testToolDiscovery(port: number): Promise<void> {

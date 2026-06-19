@@ -9,7 +9,7 @@ export function createHttpServer(mcp: McpHandler) {
       const url = new URL(req.url || "/", buildBaseUrl(req));
       if (req.method === "OPTIONS") return sendOptions(req, res);
       if (url.pathname === "/healthz") return sendText(req, res, 200, "ok");
-      if (url.pathname === "/.well-known/oauth-protected-resource") {
+      if (isProtectedResourceMetadataPath(url.pathname)) {
         return sendJson(req, res, 200, { resource: buildBaseUrl(req), bearer_methods_supported: ["header"] });
       }
       if (url.pathname !== config.mcpPath) return sendJson(req, res, 404, { error: "not_found" });
@@ -40,6 +40,10 @@ export function createHttpServer(mcp: McpHandler) {
       return sendJson(req, res, 500, { error: "internal_error", message: error instanceof Error ? error.message : String(error) });
     }
   });
+}
+
+function isProtectedResourceMetadataPath(pathname: string): boolean {
+  return pathname === "/.well-known/oauth-protected-resource" || pathname === `/.well-known/oauth-protected-resource${config.mcpPath}`;
 }
 
 function authorize(req: IncomingMessage, res: ServerResponse): boolean {
