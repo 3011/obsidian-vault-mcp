@@ -61,7 +61,7 @@ vault_create_external_reference_note
 Apply the full-access server profile:
 
 ```bash
-kubectl apply -f deploy/openai-tunnel-full-access.yaml
+kubectl -n YOUR_NAMESPACE apply -k deploy/personal-full-access
 kubectl -n YOUR_NAMESPACE rollout status deploy/obsidian-vault-mcp
 ```
 

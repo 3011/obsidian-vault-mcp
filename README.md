@@ -139,12 +139,14 @@ GitHub Actions publishes images to `ghcr.io/3011/obsidian-vault-mcp` for pushes 
 
 ## Kubernetes Example
 
+Split manifests and Chinese deployment notes are available under `deploy/`; see `deploy/README.zh-CN.md`.
+
 ```bash
 kubectl -n YOUR_NAMESPACE create secret generic obsidian-vault-mcp-token \
   --from-literal=MCP_TOKEN="$(openssl rand -hex 32)" \
   --dry-run=client -o yaml | kubectl apply -f -
 
-kubectl apply -f deploy/kubernetes.yaml
+kubectl -n YOUR_NAMESPACE apply -k deploy/default
 kubectl -n YOUR_NAMESPACE rollout status deploy/obsidian-vault-mcp
 ```
 
@@ -153,7 +155,7 @@ kubectl -n YOUR_NAMESPACE rollout status deploy/obsidian-vault-mcp
 For pure personal use where ChatGPT is intentionally allowed to use every vault tool, use the full-access tunnel profile:
 
 ```bash
-kubectl apply -f deploy/openai-tunnel-full-access.yaml
+kubectl -n YOUR_NAMESPACE apply -k deploy/personal-full-access
 kubectl -n YOUR_NAMESPACE rollout status deploy/obsidian-vault-mcp
 ```
 
