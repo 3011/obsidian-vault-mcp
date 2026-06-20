@@ -219,17 +219,23 @@ export function buildTools(vault: FsVault): Tool[] {
           filename: { type: "string" },
           mimeType: { type: "string", enum: ["image/png", "image/jpeg", "image/webp", "image/gif"] },
           contentBase64: { type: "string" },
+          expectedSha256: { type: "string", description: "Optional expected SHA-256 of the original decoded image bytes. Recommended for lossless/original preservation." },
+          expectedSize: { type: "integer", minimum: 1, description: "Optional expected decoded image byte size. Recommended with expectedSha256 for lossless/original preservation." },
+          preserveOriginal: { type: "boolean", description: "Set true when the upload must preserve original bytes; this requires expectedSha256 and expectedSize in the default integrity mode." },
           dir: { type: "string", description: "Optional vault-relative asset directory. Defaults to the inbox assets directory." }
         },
         required: ["filename", "mimeType", "contentBase64"],
         additionalProperties: false
       },
       handler: async (args) => {
-        const input: { filename: string; mimeType: string; contentBase64: string; dir?: string } = {
+        const input: { filename: string; mimeType: string; contentBase64: string; expectedSha256?: string; expectedSize?: number; preserveOriginal?: boolean; dir?: string } = {
           filename: String(args.filename ?? ""),
           mimeType: String(args.mimeType ?? ""),
           contentBase64: String(args.contentBase64 ?? "")
         };
+        if (typeof args.expectedSha256 === "string") input.expectedSha256 = args.expectedSha256;
+        if (typeof args.expectedSize === "number") input.expectedSize = args.expectedSize;
+        if (typeof args.preserveOriginal === "boolean") input.preserveOriginal = args.preserveOriginal;
         if (typeof args.dir === "string") input.dir = args.dir;
         return vault.uploadImageAsset(input);
       }
@@ -250,7 +256,10 @@ export function buildTools(vault: FsVault): Tool[] {
               properties: {
                 filename: { type: "string" },
                 mimeType: { type: "string", enum: ["image/png", "image/jpeg", "image/webp", "image/gif"] },
-                contentBase64: { type: "string" }
+                contentBase64: { type: "string" },
+                expectedSha256: { type: "string", description: "Optional expected SHA-256 of the original decoded image bytes. Recommended for lossless/original preservation." },
+                expectedSize: { type: "integer", minimum: 1, description: "Optional expected decoded image byte size. Recommended with expectedSha256 for lossless/original preservation." },
+                preserveOriginal: { type: "boolean", description: "Set true when the upload must preserve original bytes; this requires expectedSha256 and expectedSize in the default integrity mode." }
               },
               required: ["filename", "mimeType", "contentBase64"],
               additionalProperties: false
@@ -344,16 +353,20 @@ function toolEnabled(name: string): boolean {
   ].includes(name);
 }
 
-function parseImageAssets(value: unknown): Array<{ filename: string; mimeType: string; contentBase64: string }> {
+function parseImageAssets(value: unknown): Array<{ filename: string; mimeType: string; contentBase64: string; expectedSha256?: string; expectedSize?: number; preserveOriginal?: boolean }> {
   if (!Array.isArray(value)) throw new Error("assets must be an array");
   return value.map((item, index) => {
     if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error(`assets[${index}] must be an object`);
     const record = item as Record<string, unknown>;
-    return {
+    const parsed: { filename: string; mimeType: string; contentBase64: string; expectedSha256?: string; expectedSize?: number; preserveOriginal?: boolean } = {
       filename: String(record.filename ?? ""),
       mimeType: String(record.mimeType ?? ""),
       contentBase64: String(record.contentBase64 ?? "")
     };
+    if (typeof record.expectedSha256 === "string") parsed.expectedSha256 = record.expectedSha256;
+    if (typeof record.expectedSize === "number") parsed.expectedSize = record.expectedSize;
+    if (typeof record.preserveOriginal === "boolean") parsed.preserveOriginal = record.preserveOriginal;
+    return parsed;
   });
 }
 

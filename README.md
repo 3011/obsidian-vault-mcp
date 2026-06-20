@@ -40,10 +40,30 @@ Destructive tools are intentionally exposed because the operator accepts that ri
 - Duplicate heading paths currently follow `markdown-patch` map behavior: the later matching heading wins. Prefer unique heading paths when using `vault_patch` or pass a more specific nested path.
 - `vault_move` supports destination directories ending in `/` and optional overwrite.
 - `vault_upload_image_asset` accepts PNG, JPEG, WebP, and GIF only; it verifies MIME, extension, size, basic magic bytes, and requires the target directory to be named `assets`.
+- `vault_upload_image_asset` and `vault_create_note_with_assets` accept optional `expectedSha256`, `expectedSize`, and `preserveOriginal` fields. Use them when the caller needs to prove original byte preservation.
 - `vault_create_note_with_assets` stores images under a note-local `assets/` directory and replaces `{{asset:n}}` placeholders with embeds.
 - `vault_create_external_reference_note` is for NAS, cloud drive, ticket, PDF, Word, Excel, zip, or log bundle references that should not be stored in the vault.
 - `search_simple` returns all matches per file with filename/content source and context.
 - `tag_list` scans frontmatter tags and inline tags, including parent counts for nested tags.
+
+## Image Integrity
+
+For routine screenshots, callers may upload only `filename`, `mimeType`, and `contentBase64`. The server returns the decoded `bytes`, `sha256`, `mimeType`, and an `integrity` object.
+
+For original/lossless preservation, callers should include:
+
+```json
+{
+  "filename": "original.png",
+  "mimeType": "image/png",
+  "contentBase64": "...",
+  "expectedSha256": "1f3373db406b302e25912db5f23a01777a53f6aba588fcd06846a7d32db9411b",
+  "expectedSize": 91353,
+  "preserveOriginal": true
+}
+```
+
+With the default `IMAGE_ASSET_INTEGRITY_MODE=required_for_preserve_original`, `preserveOriginal=true` requires both expected fields and rejects the upload before writing if either value does not match.
 
 ## Run
 
@@ -79,6 +99,7 @@ MCP_TOKEN=change-me VAULT_ROOT=/tmp/vault npm start
 | `ASSETS_DIR_NAME` | `assets` | Directory name used for note-local image assets. |
 | `MAX_IMAGE_ASSET_BYTES` | `10485760` | Maximum decoded image asset size. |
 | `ALLOWED_IMAGE_MIME_TYPES` | `image/png,image/jpeg,image/webp,image/gif` | Comma-separated image MIME allowlist. |
+| `IMAGE_ASSET_INTEGRITY_MODE` | `required_for_preserve_original` | Image integrity policy: `optional`, `required_for_preserve_original`, or `required`. |
 | `ENABLE_AUDIT_LOG` | `true` | Log mutating operations as JSON. |
 | `AUDIT_LOG_PATH` | empty | Optional JSONL audit log file path. Defaults to stdout when empty. |
 | `TRASH_DELETE` | `true` | Move deleted notes into the trash directory instead of permanent deletion. |

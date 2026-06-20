@@ -60,6 +60,8 @@ spec:
               value: "10485760"
             - name: ALLOWED_IMAGE_MIME_TYPES
               value: image/png,image/jpeg,image/webp,image/gif
+            - name: IMAGE_ASSET_INTEGRITY_MODE
+              value: required_for_preserve_original
             - name: ENABLE_AUDIT_LOG
               value: "true"
             - name: AUDIT_LOG_PATH

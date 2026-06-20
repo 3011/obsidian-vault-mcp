@@ -29,6 +29,7 @@ ENABLE_EXTERNAL_REFERENCE_NOTES=true
 ASSETS_DIR_NAME=assets
 MAX_IMAGE_ASSET_BYTES=10485760
 ALLOWED_IMAGE_MIME_TYPES=image/png,image/jpeg,image/webp,image/gif
+IMAGE_ASSET_INTEGRITY_MODE=required_for_preserve_original
 
 ENABLE_AUDIT_LOG=true
 AUDIT_LOG_PATH=/data/audit/obsidian-vault-mcp.audit.log
@@ -89,6 +90,7 @@ Service 故意使用 `ClusterIP`，只应该在集群内部访问。
 - 日常捕获优先用 `append_to_inbox`；
 - PDF、Word、Excel、zip、大日志包优先用 `vault_create_external_reference_note` 只记录引用；
 - 只有截图、架构图等小图片确实属于笔记内容时，才用 `vault_create_note_with_assets`；
+- 图片必须作为原始字节无损保存时，使用 `expectedSha256`、`expectedSize` 和 `preserveOriginal=true`；
 - ChatGPT UI 出现破坏性工具确认时，仔细检查调用内容。
 
 已验证的 k3s + ChatGPT tunnel 覆盖范围包括 list、read、write、append、patch、delete、move、search、tag listing、inbox append、image asset upload、note creation with assets 和 external reference note creation。切换主 vault 前，仍然建议从 `.trash/` 和 `.backups/` 做一次恢复演练，并轮换测试期间暴露过的 runtime API key。

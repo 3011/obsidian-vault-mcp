@@ -32,6 +32,12 @@ function listEnv(name: string, defaultValue: string[]): string[] {
   return raw.split(",").map((value) => value.trim()).filter(Boolean);
 }
 
+function imageAssetIntegrityModeEnv(): "optional" | "required_for_preserve_original" | "required" {
+  const raw = (process.env.IMAGE_ASSET_INTEGRITY_MODE || "required_for_preserve_original").trim();
+  if (raw === "optional" || raw === "required_for_preserve_original" || raw === "required") return raw;
+  return "required_for_preserve_original";
+}
+
 export type Config = {
   host: string;
   port: number;
@@ -59,6 +65,7 @@ export type Config = {
   assetsDirName: string;
   maxImageAssetBytes: number;
   allowedImageMimeTypes: string[];
+  imageAssetIntegrityMode: "optional" | "required_for_preserve_original" | "required";
   enableImageAssets: boolean;
   enableExternalReferenceNotes: boolean;
   trashDelete: boolean;
@@ -98,6 +105,7 @@ export const config: Config = {
   assetsDirName: (process.env.ASSETS_DIR_NAME || "assets").replace(/^\/+|\/+$/g, "") || "assets",
   maxImageAssetBytes: intEnv("MAX_IMAGE_ASSET_BYTES", 10 * 1024 * 1024),
   allowedImageMimeTypes: listEnv("ALLOWED_IMAGE_MIME_TYPES", ["image/png", "image/jpeg", "image/webp", "image/gif"]),
+  imageAssetIntegrityMode: imageAssetIntegrityModeEnv(),
   enableImageAssets: boolEnv("ENABLE_IMAGE_ASSETS", true),
   enableExternalReferenceNotes: boolEnv("ENABLE_EXTERNAL_REFERENCE_NOTES", true),
   trashDelete: boolEnv("TRASH_DELETE", true),

@@ -7,7 +7,7 @@ import { PathGuard } from "./pathGuard.js";
 import { getDocumentMap } from "../markdown/documentMap.js";
 import { frontmatterTags, parseFrontmatter } from "../markdown/frontmatter.js";
 import { patchMarkdown, type PatchArgs } from "../markdown/patch.js";
-import { allowedImageExtensions, prepareImageAsset, uniqueAssetFilename, type ImageAssetInput, type PreparedImageAsset } from "./imageAssets.js";
+import { allowedImageExtensions, prepareImageAsset, uniqueAssetFilename, type ImageAssetInput, type ImageAssetIntegrity, type ImageAssetIntegrityMode, type PreparedImageAsset } from "./imageAssets.js";
 
 export type ImageAssetResult = {
   path: string;
@@ -15,6 +15,7 @@ export type ImageAssetResult = {
   bytes: number;
   sha256: string;
   mimeType: string;
+  integrity: ImageAssetIntegrity;
 };
 
 export type ExternalReference = {
@@ -30,6 +31,7 @@ export class FsVault {
   private readonly assetsDirName: string;
   private readonly maxImageAssetBytes: number;
   private readonly allowedImageMimeTypes: string[];
+  private readonly imageAssetIntegrityMode: ImageAssetIntegrityMode;
   private readonly trashDelete: boolean;
   private readonly trashDir: string;
   private readonly backupBeforeWrite: boolean;
@@ -39,6 +41,7 @@ export class FsVault {
     assetsDirName?: string;
     maxImageAssetBytes?: number;
     allowedImageMimeTypes?: string[];
+    imageAssetIntegrityMode?: ImageAssetIntegrityMode;
     trashDelete?: boolean;
     trashDir?: string;
     backupBeforeWrite?: boolean;
@@ -48,6 +51,7 @@ export class FsVault {
     this.assetsDirName = sanitizeDirName(options.assetsDirName || "assets");
     this.maxImageAssetBytes = options.maxImageAssetBytes || 10 * 1024 * 1024;
     this.allowedImageMimeTypes = options.allowedImageMimeTypes || ["image/png", "image/jpeg", "image/webp", "image/gif"];
+    this.imageAssetIntegrityMode = options.imageAssetIntegrityMode || "required_for_preserve_original";
     this.trashDelete = options.trashDelete ?? true;
     this.trashDir = sanitizeDirName(options.trashDir || ".trash");
     this.backupBeforeWrite = options.backupBeforeWrite ?? true;
@@ -139,7 +143,7 @@ export class FsVault {
   async uploadImageAsset(input: ImageAssetInput & { dir?: string }): Promise<ImageAssetResult> {
     const assetDir = this.guard.validateAssetDir(input.dir || `${this.guard.defaultWriteDir}/${this.assetsDirName}`);
     this.assertAssetDir(assetDir);
-    const asset = prepareImageAsset(input, this.allowedImageMimeTypes, this.maxImageAssetBytes);
+    const asset = prepareImageAsset(input, this.allowedImageMimeTypes, this.maxImageAssetBytes, this.imageAssetIntegrityMode);
     return this.savePreparedImageAsset(assetDir, asset);
   }
 
@@ -147,7 +151,7 @@ export class FsVault {
     const relative = this.guard.validateFilePath(filePath, { allowMissing: true });
     const noteDir = path.posix.dirname(relative);
     const assetDir = noteDir === "." ? this.assetsDirName : `${noteDir}/${this.assetsDirName}`;
-    const prepared = assets.map((asset) => prepareImageAsset(asset, this.allowedImageMimeTypes, this.maxImageAssetBytes));
+    const prepared = assets.map((asset) => prepareImageAsset(asset, this.allowedImageMimeTypes, this.maxImageAssetBytes, this.imageAssetIntegrityMode));
     validateAssetPlaceholders(content, prepared.length);
 
     return this.locks.withLock([relative], async () => {
@@ -335,16 +339,17 @@ export class FsVault {
       try {
         const absolute = this.guard.resolveCreate(relative);
         await atomicWriteFile(absolute, asset.bytes);
-        await audit("vault_upload_image_asset", "success", { path: relative, bytes: asset.byteLength, sha256: asset.sha256, mimeType: asset.mimeType });
+        await audit("vault_upload_image_asset", "success", assetAuditDetails(relative, asset));
         return {
           path: relative,
           embed: `![[${relative}]]`,
           bytes: asset.byteLength,
           sha256: asset.sha256,
-          mimeType: asset.mimeType
+          mimeType: asset.mimeType,
+          integrity: asset.integrity
         };
       } catch (error) {
-        await audit("vault_upload_image_asset", "failure", { path: relative, bytes: asset.byteLength, sha256: asset.sha256, mimeType: asset.mimeType, error: errorMessage(error) });
+        await audit("vault_upload_image_asset", "failure", { ...assetAuditDetails(relative, asset), error: errorMessage(error) });
         throw error;
       }
     });
@@ -512,6 +517,19 @@ function expandTag(tag: string): string[] {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function assetAuditDetails(relative: string, asset: PreparedImageAsset): Record<string, unknown> {
+  return {
+    path: relative,
+    bytes: asset.byteLength,
+    sha256: asset.sha256,
+    mimeType: asset.mimeType,
+    expectedSha256: asset.expectedSha256,
+    expectedSize: asset.expectedSize,
+    preserveOriginal: asset.integrity.preserveOriginal,
+    integrityVerified: asset.integrity.verified
+  };
 }
 
 function escapeRegExp(value: string): string {

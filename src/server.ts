@@ -8,6 +8,7 @@ const vault = new FsVault(config.vaultRoot, config.defaultWriteDir, {
   assetsDirName: config.assetsDirName,
   maxImageAssetBytes: config.maxImageAssetBytes,
   allowedImageMimeTypes: config.allowedImageMimeTypes,
+  imageAssetIntegrityMode: config.imageAssetIntegrityMode,
   trashDelete: config.trashDelete,
   trashDir: config.trashDir,
   backupBeforeWrite: config.backupBeforeWrite,

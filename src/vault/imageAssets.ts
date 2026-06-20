@@ -5,6 +5,19 @@ export type ImageAssetInput = {
   filename: string;
   mimeType: string;
   contentBase64: string;
+  expectedSha256?: string;
+  expectedSize?: number;
+  preserveOriginal?: boolean;
+};
+
+export type ImageAssetIntegrityMode = "optional" | "required_for_preserve_original" | "required";
+
+export type ImageAssetIntegrity = {
+  mode: ImageAssetIntegrityMode;
+  preserveOriginal: boolean;
+  expectedSha256Matched?: boolean;
+  expectedSizeMatched?: boolean;
+  verified: boolean;
 };
 
 export type PreparedImageAsset = {
@@ -14,6 +27,9 @@ export type PreparedImageAsset = {
   byteLength: number;
   sha256: string;
   extension: string;
+  integrity: ImageAssetIntegrity;
+  expectedSha256?: string;
+  expectedSize?: number;
 };
 
 const MIME_EXTENSIONS: Record<string, string> = {
@@ -27,7 +43,7 @@ export function allowedImageExtensions(allowedMimeTypes: string[]): string[] {
   return [...new Set(allowedMimeTypes.map((mime) => MIME_EXTENSIONS[mime]).filter((value): value is string => Boolean(value)))];
 }
 
-export function prepareImageAsset(input: ImageAssetInput, allowedMimeTypes: string[], maxBytes: number): PreparedImageAsset {
+export function prepareImageAsset(input: ImageAssetInput, allowedMimeTypes: string[], maxBytes: number, integrityMode: ImageAssetIntegrityMode): PreparedImageAsset {
   const mimeType = input.mimeType.trim().toLowerCase();
   if (!allowedMimeTypes.includes(mimeType)) throw new Error(`image MIME type is not allowed: ${mimeType}`);
 
@@ -42,7 +58,11 @@ export function prepareImageAsset(input: ImageAssetInput, allowedMimeTypes: stri
   if (!extension) throw new Error(`image MIME type is not supported: ${mimeType}`);
   const filename = sanitizeAssetFilename(input.filename, extension);
   const sha256 = createHash("sha256").update(bytes).digest("hex");
-  return { filename, mimeType, bytes, byteLength: bytes.length, sha256, extension };
+  const { integrity, expectedSha256, expectedSize } = validateIntegrity(input, sha256, bytes.length, integrityMode);
+  const prepared: PreparedImageAsset = { filename, mimeType, bytes, byteLength: bytes.length, sha256, extension, integrity };
+  if (expectedSha256) prepared.expectedSha256 = expectedSha256;
+  if (expectedSize != null) prepared.expectedSize = expectedSize;
+  return prepared;
 }
 
 export function sanitizeAssetFilename(filename: string, requiredExtension: string): string {
@@ -97,4 +117,55 @@ function magicMatches(mimeType: string, bytes: Uint8Array): boolean {
 function startsWith(bytes: Uint8Array, prefix: number[]): boolean {
   if (bytes.length < prefix.length) return false;
   return prefix.every((value, index) => bytes[index] === value);
+}
+
+function validateIntegrity(
+  input: ImageAssetInput,
+  actualSha256: string,
+  actualSize: number,
+  mode: ImageAssetIntegrityMode
+): { integrity: ImageAssetIntegrity; expectedSha256?: string; expectedSize?: number } {
+  const preserveOriginal = input.preserveOriginal === true;
+  const expectedSha256 = normalizeExpectedSha256(input.expectedSha256);
+  const expectedSize = normalizeExpectedSize(input.expectedSize);
+  const expectedSha256Required = mode === "required" || (mode === "required_for_preserve_original" && preserveOriginal);
+  const expectedSizeRequired = expectedSha256Required;
+
+  if (expectedSha256Required && !expectedSha256) throw new Error("expectedSha256 is required for image asset integrity verification");
+  if (expectedSizeRequired && expectedSize == null) throw new Error("expectedSize is required for image asset integrity verification");
+
+  let expectedSha256Matched: boolean | undefined;
+  if (expectedSha256) {
+    expectedSha256Matched = expectedSha256 === actualSha256;
+    if (!expectedSha256Matched) throw new Error("image asset sha256 does not match expectedSha256");
+  }
+
+  let expectedSizeMatched: boolean | undefined;
+  if (expectedSize != null) {
+    expectedSizeMatched = expectedSize === actualSize;
+    if (!expectedSizeMatched) throw new Error("image asset size does not match expectedSize");
+  }
+
+  const verified = expectedSha256Matched === true && expectedSizeMatched === true;
+  const integrity: ImageAssetIntegrity = { mode, preserveOriginal, verified };
+  if (expectedSha256Matched != null) integrity.expectedSha256Matched = expectedSha256Matched;
+  if (expectedSizeMatched != null) integrity.expectedSizeMatched = expectedSizeMatched;
+  const result: { integrity: ImageAssetIntegrity; expectedSha256?: string; expectedSize?: number } = { integrity };
+  if (expectedSha256) result.expectedSha256 = expectedSha256;
+  if (expectedSize != null) result.expectedSize = expectedSize;
+  return result;
+}
+
+function normalizeExpectedSha256(value: unknown): string | undefined {
+  if (value == null || value === "") return undefined;
+  if (typeof value !== "string") throw new Error("expectedSha256 must be a string");
+  const normalized = value.trim().toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(normalized)) throw new Error("expectedSha256 must be a 64 character hex string");
+  return normalized;
+}
+
+function normalizeExpectedSize(value: unknown): number | undefined {
+  if (value == null || value === "") return undefined;
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) throw new Error("expectedSize must be a positive integer");
+  return value;
 }

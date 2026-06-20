@@ -54,6 +54,7 @@ kubectl -n YOUR_NAMESPACE rollout status deploy/obsidian-vault-mcp
 - `MCP_REQUIRE_TOKEN=false`
 - `READ_ONLY=false`
 - 开启写入、追加、patch、删除、移动、inbox、图片资产、外部引用笔记工具
+- 图片资产使用 `IMAGE_ASSET_INTEGRITY_MODE=required_for_preserve_original`
 - `TRASH_DELETE=true`
 - `BACKUP_BEFORE_WRITE=true`
 - 审计日志写到 `/data/audit/obsidian-vault-mcp.audit.log`

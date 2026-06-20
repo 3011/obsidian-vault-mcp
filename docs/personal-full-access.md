@@ -29,6 +29,7 @@ ENABLE_EXTERNAL_REFERENCE_NOTES=true
 ASSETS_DIR_NAME=assets
 MAX_IMAGE_ASSET_BYTES=10485760
 ALLOWED_IMAGE_MIME_TYPES=image/png,image/jpeg,image/webp,image/gif
+IMAGE_ASSET_INTEGRITY_MODE=required_for_preserve_original
 
 ENABLE_AUDIT_LOG=true
 AUDIT_LOG_PATH=/data/audit/obsidian-vault-mcp.audit.log
@@ -89,6 +90,7 @@ Before using it with a primary vault:
 - prefer `append_to_inbox` for routine capture workflows;
 - prefer `vault_create_external_reference_note` for PDFs, Word, Excel, zip files, and large log bundles;
 - use `vault_create_note_with_assets` only for screenshots, diagrams, and other small images that belong in the note;
+- use `expectedSha256`, `expectedSize`, and `preserveOriginal=true` when an image must be preserved as exact original bytes;
 - review destructive tool calls carefully in the ChatGPT UI when confirmation is shown.
 
 Validated k3s + ChatGPT tunnel coverage includes list, read, write, append, patch, delete, move, search, tag listing, inbox append, image asset upload, note creation with assets, and external reference note creation. Before cutting over a primary vault, still run a restore drill from `.trash/` and `.backups/` and rotate any runtime API key that was exposed during testing.

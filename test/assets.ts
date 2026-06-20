@@ -1,6 +1,7 @@
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { callTool, createVaultServer, expectToolError, rpc } from "./helpers.js";
 
 const png = b64([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]);
@@ -14,6 +15,7 @@ const server = await createVaultServer({ MAX_IMAGE_ASSET_BYTES: "32" });
 try {
   await testToolDiscovery();
   await testUploadImages();
+  await testImageIntegrity();
   await testCreateNoteWithAssets();
   await testExternalReferenceNote();
   await testRejectedAssets();
@@ -48,6 +50,9 @@ async function testUploadImages(): Promise<void> {
     assert.equal(result.mimeType, image.mimeType);
     assert.equal(result.bytes, Buffer.from(image.contentBase64, "base64").length);
     assert.equal(result.sha256.length, 64);
+    assert.equal(result.integrity.mode, "required_for_preserve_original");
+    assert.equal(result.integrity.preserveOriginal, false);
+    assert.equal(result.integrity.verified, false);
     await stat(path.join(server.vault, result.path));
   }
 
@@ -59,18 +64,100 @@ async function testUploadImages(): Promise<void> {
   assert.match(duplicate.path, /^98-Inbox\/assets\/one-[a-f0-9]{12}\.png$/);
 }
 
+async function testImageIntegrity(): Promise<void> {
+  const expectedSha256 = sha256Base64(png);
+  const expectedSize = Buffer.from(png, "base64").length;
+  const verified = await callTool(server.port, "vault_upload_image_asset", {
+    filename: "verified.png",
+    mimeType: "image/png",
+    contentBase64: png,
+    expectedSha256,
+    expectedSize,
+    preserveOriginal: true
+  });
+  assert.equal(verified.sha256, expectedSha256);
+  assert.equal(verified.bytes, expectedSize);
+  assert.equal(verified.integrity.preserveOriginal, true);
+  assert.equal(verified.integrity.expectedSha256Matched, true);
+  assert.equal(verified.integrity.expectedSizeMatched, true);
+  assert.equal(verified.integrity.verified, true);
+
+  await expectToolError(server.port, "vault_upload_image_asset", {
+    filename: "missing-expected.png",
+    mimeType: "image/png",
+    contentBase64: png,
+    preserveOriginal: true
+  }, /expectedSha256 is required/i);
+
+  await expectToolError(server.port, "vault_upload_image_asset", {
+    filename: "wrong-hash.png",
+    mimeType: "image/png",
+    contentBase64: png,
+    expectedSha256: "0".repeat(64),
+    expectedSize
+  }, /sha256 does not match/i);
+  await assertMissing(path.join(server.vault, "98-Inbox", "assets", "wrong-hash.png"));
+
+  await expectToolError(server.port, "vault_upload_image_asset", {
+    filename: "wrong-size.png",
+    mimeType: "image/png",
+    contentBase64: png,
+    expectedSha256,
+    expectedSize: expectedSize + 1
+  }, /size does not match/i);
+  await assertMissing(path.join(server.vault, "98-Inbox", "assets", "wrong-size.png"));
+
+  const requiredServer = await createVaultServer({ MAX_IMAGE_ASSET_BYTES: "32", IMAGE_ASSET_INTEGRITY_MODE: "required" });
+  try {
+    await expectToolError(requiredServer.port, "vault_upload_image_asset", {
+      filename: "required.png",
+      mimeType: "image/png",
+      contentBase64: png
+    }, /expectedSha256 is required/i);
+    const requiredResult = await callTool(requiredServer.port, "vault_upload_image_asset", {
+      filename: "required.png",
+      mimeType: "image/png",
+      contentBase64: png,
+      expectedSha256,
+      expectedSize
+    });
+    assert.equal(requiredResult.integrity.mode, "required");
+    assert.equal(requiredResult.integrity.verified, true);
+  } finally {
+    await requiredServer.close();
+  }
+
+  const optionalServer = await createVaultServer({ MAX_IMAGE_ASSET_BYTES: "32", IMAGE_ASSET_INTEGRITY_MODE: "optional" });
+  try {
+    const optionalResult = await callTool(optionalServer.port, "vault_upload_image_asset", {
+      filename: "optional.png",
+      mimeType: "image/png",
+      contentBase64: png,
+      preserveOriginal: true
+    });
+    assert.equal(optionalResult.integrity.mode, "optional");
+    assert.equal(optionalResult.integrity.preserveOriginal, true);
+    assert.equal(optionalResult.integrity.verified, false);
+  } finally {
+    await optionalServer.close();
+  }
+}
+
 async function testCreateNoteWithAssets(): Promise<void> {
+  const expectedSha256 = sha256Base64(png);
+  const expectedSize = Buffer.from(png, "base64").length;
   const result = await callTool(server.port, "vault_create_note_with_assets", {
     path: "Projects/with-assets.md",
     content: "# Screenshot\n\n{{asset:0}}\n\nBody\n",
     assets: [
-      { filename: "screen.png", mimeType: "image/png", contentBase64: png },
+      { filename: "screen.png", mimeType: "image/png", contentBase64: png, expectedSha256, expectedSize, preserveOriginal: true },
       { filename: "extra.gif", mimeType: "image/gif", contentBase64: gif }
     ]
   });
   assert.equal(result.path, "Projects/with-assets.md");
   assert.equal(result.assets.length, 2);
   assert.equal(result.assets[0].path, "Projects/assets/screen.png");
+  assert.equal(result.assets[0].integrity.verified, true);
   assert.equal(result.assets[1].path, "Projects/assets/extra.gif");
   const note = await readFile(path.join(server.vault, "Projects", "with-assets.md"), "utf8");
   assert.match(note, /!\[\[Projects\/assets\/screen\.png]]/);
@@ -78,6 +165,14 @@ async function testCreateNoteWithAssets(): Promise<void> {
   assert.match(note, /!\[\[Projects\/assets\/extra\.gif]]/);
   await stat(path.join(server.vault, "Projects", "assets", "screen.png"));
   await stat(path.join(server.vault, "Projects", "assets", "extra.gif"));
+
+  await expectToolError(server.port, "vault_create_note_with_assets", {
+    path: "Projects/bad-integrity-note.md",
+    content: "{{asset:0}}",
+    assets: [{ filename: "bad-integrity.png", mimeType: "image/png", contentBase64: png, expectedSha256: "0".repeat(64), expectedSize }]
+  }, /sha256 does not match/i);
+  await assertMissing(path.join(server.vault, "Projects", "bad-integrity-note.md"));
+  await assertMissing(path.join(server.vault, "Projects", "assets", "bad-integrity.png"));
 }
 
 async function testExternalReferenceNote(): Promise<void> {
@@ -147,4 +242,18 @@ async function testRejectedAssets(): Promise<void> {
 
 function b64(bytes: number[]): string {
   return Buffer.from(bytes).toString("base64");
+}
+
+function sha256Base64(base64: string): string {
+  return createHash("sha256").update(Buffer.from(base64, "base64")).digest("hex");
+}
+
+async function assertMissing(filePath: string): Promise<void> {
+  try {
+    await stat(filePath);
+  } catch (error: any) {
+    if (error?.code === "ENOENT") return;
+    throw error;
+  }
+  assert.fail(`expected file to be missing: ${filePath}`);
 }

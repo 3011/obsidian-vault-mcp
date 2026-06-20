@@ -40,10 +40,30 @@ livesync-cli daemon -> /data/vault -> obsidian-vault-mcp -> ChatGPT Connector
 - duplicate heading path 当前遵循 `markdown-patch` 的 map 行为：后匹配的 heading 会胜出。使用 `vault_patch` 时建议保持 heading path 唯一，或传入更具体的 nested path。
 - `vault_move` 支持 destination 以 `/` 结尾表示目标目录，并支持可选 overwrite。
 - `vault_upload_image_asset` 只接受 PNG、JPEG、WebP、GIF，会校验 MIME、扩展名、大小、基础 magic bytes，并要求目标目录名为 `assets`。
+- `vault_upload_image_asset` 和 `vault_create_note_with_assets` 支持可选 `expectedSha256`、`expectedSize`、`preserveOriginal` 字段。需要证明原始字节无损保存时建议使用这些字段。
 - `vault_create_note_with_assets` 把图片保存到 note-local `assets/` 目录，并把 `{{asset:n}}` 占位符替换为 Obsidian embed。
 - `vault_create_external_reference_note` 用于 NAS、云盘、工单、PDF、Word、Excel、zip、日志包等不应该进入 vault 的原始材料。
 - `search_simple` 按文件返回所有匹配和上下文。
 - `tag_list` 扫描 frontmatter tags 和 inline tags，并统计 nested tag 的父级。
+
+## 图片完整性
+
+日常截图可以只传 `filename`、`mimeType` 和 `contentBase64`。服务端会返回解码后的 `bytes`、`sha256`、`mimeType` 和 `integrity` 对象。
+
+需要原始文件无损保存时，调用方应该传入：
+
+```json
+{
+  "filename": "original.png",
+  "mimeType": "image/png",
+  "contentBase64": "...",
+  "expectedSha256": "1f3373db406b302e25912db5f23a01777a53f6aba588fcd06846a7d32db9411b",
+  "expectedSize": 91353,
+  "preserveOriginal": true
+}
+```
+
+默认 `IMAGE_ASSET_INTEGRITY_MODE=required_for_preserve_original`。此模式下，只要 `preserveOriginal=true`，就必须提供 `expectedSha256` 和 `expectedSize`；任一值不匹配都会在写入前拒绝。
 
 ## 运行
 
@@ -79,6 +99,7 @@ MCP_TOKEN=change-me VAULT_ROOT=/tmp/vault npm start
 | `ASSETS_DIR_NAME` | `assets` | note-local 图片资产目录名。 |
 | `MAX_IMAGE_ASSET_BYTES` | `10485760` | 图片资产解码后最大字节数。 |
 | `ALLOWED_IMAGE_MIME_TYPES` | `image/png,image/jpeg,image/webp,image/gif` | 图片 MIME allowlist，逗号分隔。 |
+| `IMAGE_ASSET_INTEGRITY_MODE` | `required_for_preserve_original` | 图片完整性策略：`optional`、`required_for_preserve_original` 或 `required`。 |
 | `ENABLE_AUDIT_LOG` | `true` | 把 mutating operations 记录为 JSON。 |
 | `AUDIT_LOG_PATH` | empty | 可选 JSONL 审计日志文件路径；为空时输出到 stdout。 |
 | `TRASH_DELETE` | `true` | 删除时移动到 trash 目录，而不是永久删除。 |
