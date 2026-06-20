@@ -15,7 +15,9 @@ export class McpHandler {
     if (!message || message.jsonrpc !== "2.0" || typeof message.method !== "string") {
       return rpcError(message?.id, -32600, "Invalid Request");
     }
-    if (message.id == null) return null;
+    const hasId = Object.prototype.hasOwnProperty.call(message, "id");
+    if (!hasId) return null;
+    if (message.id == null) return rpcError(null, -32600, "Invalid Request");
 
     if (message.method === "initialize") {
       const params = message.params ?? {};

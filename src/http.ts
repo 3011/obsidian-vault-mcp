@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { timingSafeEqual } from "node:crypto";
 import { config } from "./config.js";
 import { McpHandler } from "./mcp/handler.js";
+import { rpcError, type JsonRpcRequest } from "./mcp/types.js";
 
 export function createHttpServer(mcp: McpHandler) {
   return createServer(async (req, res) => {
@@ -15,21 +16,20 @@ export function createHttpServer(mcp: McpHandler) {
       if (url.pathname !== config.mcpPath) return sendJson(req, res, 404, { error: "not_found" });
       if (!authorize(req, res)) return;
 
-      if (req.method === "GET" || req.method === "HEAD") {
-        return sendJson(req, res, 200, {
-          status: "ok",
-          transport: "streamable-http",
-          endpoint: config.mcpPath,
-          serverInfo: { name: config.serverName, version: config.serverVersion }
-        });
-      }
+      if (req.method === "GET" || req.method === "HEAD") return sendJson(req, res, 405, { error: "method_not_allowed" }, { allow: "POST, OPTIONS" });
       if (req.method !== "POST") return sendJson(req, res, 405, { error: "method_not_allowed" });
 
       const protocolVersion = header(req, "mcp-protocol-version");
       if (protocolVersion && !mcp.supportedProtocolVersions().includes(protocolVersion)) {
         return sendJson(req, res, 400, { error: "unsupported_protocol_version", supported: mcp.supportedProtocolVersions() });
       }
-      const message = JSON.parse(await readBody(req, config.maxRequestBytes) || "null");
+      const body = await readBody(req, config.maxRequestBytes);
+      let message: JsonRpcRequest;
+      try {
+        message = JSON.parse(body || "null") as JsonRpcRequest;
+      } catch {
+        return sendJson(req, res, 200, rpcError(null, -32700, "Parse error"));
+      }
       const response = await mcp.handle(message, protocolVersion);
       if (response == null) return sendEmpty(req, res, 202);
       return sendJson(req, res, 200, response);
@@ -71,7 +71,7 @@ function authorize(req: IncomingMessage, res: ServerResponse): boolean {
 function buildBaseUrl(req: IncomingMessage): string {
   if (config.publicBaseUrl) return config.publicBaseUrl;
   const host = header(req, "host") || `localhost:${config.port}`;
-  const proto = header(req, "x-forwarded-proto") || "https";
+  const proto = header(req, "x-forwarded-proto") || "http";
   return `${proto}://${host}`;
 }
 

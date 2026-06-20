@@ -56,6 +56,8 @@ child.stderr.on("data", (chunk) => { stderr += String(chunk); });
 try {
   await waitForHealth(port);
   await testAuth(port);
+  await testProtocolBasics(port);
+  await testMalformedJsonAndNullId(port);
   await testWellKnownMetadata(port);
   await testToolDiscovery(port);
   await testRequestBodyLimit(port);
@@ -81,6 +83,63 @@ async function testAuth(port: number): Promise<void> {
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} })
   });
   assert.equal(res.status, 401);
+  const auth = res.headers.get("www-authenticate");
+  assert(auth?.includes(`resource_metadata="http://127.0.0.1:${port}/.well-known/oauth-protected-resource"`));
+}
+
+async function testProtocolBasics(port: number): Promise<void> {
+  const initialize = await rpc(port, {
+    jsonrpc: "2.0",
+    id: 1,
+    method: "initialize",
+    params: { protocolVersion: "2025-06-18" }
+  });
+  assert.equal(initialize.result.protocolVersion, "2025-06-18");
+  assert.equal(initialize.result.serverInfo.name, "obsidian-vault-mcp");
+  assert.deepEqual(initialize.result.capabilities, { tools: {} });
+
+  const ping = await rpc(port, { jsonrpc: "2.0", id: 2, method: "ping", params: {} });
+  assert.deepEqual(ping.result, {});
+
+  const get = await fetch(`http://127.0.0.1:${port}/mcp`, {
+    headers: { authorization: "Bearer test-token", accept: "text/event-stream" }
+  });
+  assert.equal(get.status, 405);
+  assert.equal(get.headers.get("allow"), "POST, OPTIONS");
+
+  const unsupported = await fetch(`http://127.0.0.1:${port}/mcp`, {
+    method: "POST",
+    headers: {
+      authorization: "Bearer test-token",
+      "content-type": "application/json",
+      "mcp-protocol-version": "1999-01-01"
+    },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 3, method: "ping", params: {} })
+  });
+  assert.equal(unsupported.status, 400);
+  const unsupportedBody = await unsupported.json() as any;
+  assert.equal(unsupportedBody.error, "unsupported_protocol_version");
+  assert(Array.isArray(unsupportedBody.supported));
+}
+
+async function testMalformedJsonAndNullId(port: number): Promise<void> {
+  const malformed = await fetch(`http://127.0.0.1:${port}/mcp`, {
+    method: "POST",
+    headers: { authorization: "Bearer test-token", "content-type": "application/json" },
+    body: "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":"
+  });
+  assert.equal(malformed.status, 200);
+  const malformedBody = await malformed.json() as any;
+  assert.equal(malformedBody.error.code, -32700);
+
+  const nullId = await fetch(`http://127.0.0.1:${port}/mcp`, {
+    method: "POST",
+    headers: { authorization: "Bearer test-token", "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: null, method: "ping" })
+  });
+  assert.equal(nullId.status, 200);
+  const nullIdBody = await nullId.json() as any;
+  assert.equal(nullIdBody.error.code, -32600);
 }
 
 async function testWellKnownMetadata(port: number): Promise<void> {
@@ -89,6 +148,7 @@ async function testWellKnownMetadata(port: number): Promise<void> {
     assert.equal(res.status, 200);
     const body = await res.json() as any;
     assert.equal(typeof body.resource, "string");
+    assert(body.resource.startsWith("http://127.0.0.1:"));
   }
 
   const noAuthPort = port + 3000;
@@ -104,6 +164,7 @@ async function testWellKnownMetadata(port: number): Promise<void> {
       assert.equal(res.status, 200);
       const body = await res.json() as any;
       assert.equal(typeof body.resource, "string");
+      assert(body.resource.startsWith("http://127.0.0.1:"));
     }
   } finally {
     noAuthChild.kill("SIGTERM");
