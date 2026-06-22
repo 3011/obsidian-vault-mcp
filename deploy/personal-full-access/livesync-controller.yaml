@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: obsidian-livesync-controller
+  labels:
+    app: obsidian-livesync-controller
+    profile: personal-full-access
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: obsidian-livesync-controller
+  template:
+    metadata:
+      labels:
+        app: obsidian-livesync-controller
+        profile: personal-full-access
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: obsidian-livesync-controller
+          image: ghcr.io/3011/obsidian-livesync-controller:main
+          imagePullPolicy: Always
+          env:
+            - name: LIVESYNC_DB_PATH
+              value: /data
+            - name: LIVESYNC_SETTINGS
+              value: /data/.livesync/settings.json
+            - name: LIVESYNC_VAULT
+              value: /vault
+            - name: MUTATION_QUEUE_DIR
+              value: /mutations
+            - name: CONTROLLER_PROCESSING_TIMEOUT_MS
+              value: "600000"
+            - name: CONTROLLER_POLL_INTERVAL_MS
+              value: "5000"
+          volumeMounts:
+            - name: vault
+              mountPath: /vault
+            - name: livesync-db
+              mountPath: /data
+            - name: mutations
+              mountPath: /mutations
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: vault
+          persistentVolumeClaim:
+            claimName: obsidian-vault-mcp
+        - name: livesync-db
+          persistentVolumeClaim:
+            claimName: obsidian-livesync-db
+        - name: mutations
+          persistentVolumeClaim:
+            claimName: obsidian-mutations

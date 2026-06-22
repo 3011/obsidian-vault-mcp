@@ -85,6 +85,7 @@ MCP_TOKEN=change-me VAULT_ROOT=/tmp/vault npm start
 | `MCP_PUBLIC_BASE_URL` | empty | Public base URL used in metadata responses. |
 | `MCP_ALLOWED_ORIGINS` | empty | Comma-separated CORS allowlist; `*` allows all. |
 | `VAULT_ROOT` | `/data/vault` | Markdown vault root. |
+| `MUTATION_QUEUE_DIR` | empty | Optional absolute WAL directory for LiveSync delete/move mutation intents. Must not be inside `VAULT_ROOT`. |
 | `DEFAULT_WRITE_DIR` | `98-Inbox` | Inbox directory for `append_to_inbox`. |
 | `MAX_REQUEST_BYTES` | `16777216` | Maximum JSON request body size. Keep this larger than base64-encoded image assets. |
 | `READ_ONLY` | `false` | Hide all mutating tools when true. |

@@ -4,26 +4,36 @@
 
 本文档描述推荐的生产化部署模式。
 
+LiveSync delete/move 文件复活问题的完整排查和修复记录见：[LiveSync Delete/Move 文件复活问题报告](livesync-delete-move-wal-report.zh-CN.md)。
+
 ## 推荐拓扑
 
 ```text
 Obsidian clients
   <-> LiveSync plugin
   <-> CouchDB
-  <-> livesync-cli daemon
+  <-> livesync-controller
   <-> shared vault PVC
   <-> obsidian-vault-mcp Service
   <-> private tunnel client
   <-> ChatGPT Connector
 ```
 
-MCP Server 不需要运行 Obsidian。它只读写一个普通 Markdown vault 目录，这个目录由 `livesync-cli` 从 CouchDB 同步出来。
+MCP Server 不需要运行 Obsidian。它只读写普通 Markdown vault 目录和单独的 mutation WAL 目录。LiveSync controller 串行管理 `livesync-cli daemon` 和显式 delete/move mutation，让 LiveSync/CouchDB 收到 deleted revision，而不是依赖 mirror scan 猜测删除。
 
 ## Kubernetes 组件
 
-### LiveSync daemon
+### LiveSync controller
 
-LiveSync CLI 作为长运行 Deployment 部署。它连接 CouchDB，并把 LiveSync 数据库镜像成 PVC 上的普通文件系统 vault。
+LiveSync controller 作为长运行 Deployment 部署，并挂载：
+
+```text
+/vault       # Markdown vault PVC
+/data        # LiveSync local DB 和 settings PVC
+/mutations   # MCP/controller mutation WAL PVC
+```
+
+它使用 `livesync-cli daemon` 处理正常文件监听。发现 ready delete/move mutation 时，controller 会停止 daemon，串行执行 `livesync-cli rm` 和 `push`/`sync`，再重新启动 daemon。不要再运行一个独立 sidecar 在 daemon 活跃时调用 `livesync-cli rm/push/sync`。
 
 初始推荐配置：
 
@@ -33,7 +43,7 @@ CHOKIDAR_INTERVAL=1000
 livesync-cli ... daemon --interval 10
 ```
 
-Polling 是保守方案，对个人小型 vault 足够稳定。后续可以提高节点 inotify 限制，或实现基于 CouchDB `_changes` 的低延迟流程。
+Polling 是保守方案，对个人小型 vault 足够稳定。`mirror` 只应保留给明确的人工维护窗口，不再作为日常同步主循环。
 
 ### Obsidian Vault MCP
 
@@ -54,6 +64,7 @@ kubectl -n YOUR_NAMESPACE apply -k deploy/personal-full-access
 全权限 profile 会启用所有 mutating tools 和恢复能力：
 
 ```text
+MUTATION_QUEUE_DIR=/mutations
 TRASH_DELETE=true
 BACKUP_BEFORE_WRITE=true
 ENABLE_AUDIT_LOG=true
@@ -104,7 +115,7 @@ audit log 记录 vault_delete success
 - `docker build -t obsidian-vault-mcp:ci .`
 - 用 `kubectl kustomize` 渲染 Kubernetes profiles；
 - 使用隔离 CouchDB 数据库验证 LiveSync one-shot sync；
-- 使用 shared vault PVC 验证 LiveSync daemon；
+- 使用 shared vault PVC 和 mutation PVC 验证 LiveSync controller；
 - 针对 shared vault 验证 MCP write/read/delete；
 - 通过 private tunnel 验证 ChatGPT Connector；
 - 验证 image asset 和 external reference note tools；

@@ -85,6 +85,7 @@ MCP_TOKEN=change-me VAULT_ROOT=/tmp/vault npm start
 | `MCP_PUBLIC_BASE_URL` | empty | metadata 响应使用的 public base URL。 |
 | `MCP_ALLOWED_ORIGINS` | empty | CORS allowlist，逗号分隔；`*` 表示允许全部。 |
 | `VAULT_ROOT` | `/data/vault` | Markdown vault 根目录。 |
+| `MUTATION_QUEUE_DIR` | empty | 可选的 LiveSync delete/move mutation intent WAL 绝对路径，不能位于 `VAULT_ROOT` 内。 |
 | `DEFAULT_WRITE_DIR` | `98-Inbox` | `append_to_inbox` 使用的 inbox 目录。 |
 | `MAX_REQUEST_BYTES` | `16777216` | JSON 请求体大小限制，需要大于 base64 图片资产大小。 |
 | `READ_ONLY` | `false` | 为 true 时隐藏所有 mutating tools。 |

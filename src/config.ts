@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { validateMutationQueueDir } from "./vault/mutationJournal.js";
 
 function boolEnv(name: string, defaultValue: boolean): boolean {
   const raw = process.env[name];
@@ -73,7 +74,11 @@ export type Config = {
   backupBeforeWrite: boolean;
   backupDir: string;
   auditLogPath: string;
+  mutationQueueDir: string;
 };
+
+const vaultRoot = path.resolve(process.env.VAULT_ROOT || "/data/vault");
+const rawMutationQueueDir = (process.env.MUTATION_QUEUE_DIR || "").trim();
 
 export const config: Config = {
   host: process.env.MCP_HOST || "0.0.0.0",
@@ -82,7 +87,7 @@ export const config: Config = {
   publicBaseUrl: (process.env.MCP_PUBLIC_BASE_URL || "").trim().replace(/\/+$/, ""),
   serverName: process.env.MCP_SERVER_NAME || "obsidian-vault-mcp",
   serverVersion: process.env.MCP_SERVER_VERSION || "0.1.0",
-  vaultRoot: path.resolve(process.env.VAULT_ROOT || "/data/vault"),
+  vaultRoot,
   defaultWriteDir: (process.env.DEFAULT_WRITE_DIR || "98-Inbox").replace(/^\/+|\/+$/g, ""),
   requireToken: boolEnv("MCP_REQUIRE_TOKEN", true),
   token: tokenFromEnv(),
@@ -112,5 +117,6 @@ export const config: Config = {
   trashDir: (process.env.TRASH_DIR || ".trash").replace(/^\/+|\/+$/g, "") || ".trash",
   backupBeforeWrite: boolEnv("BACKUP_BEFORE_WRITE", true),
   backupDir: (process.env.BACKUP_DIR || ".backups").replace(/^\/+|\/+$/g, "") || ".backups",
-  auditLogPath: (process.env.AUDIT_LOG_PATH || "").trim()
+  auditLogPath: (process.env.AUDIT_LOG_PATH || "").trim(),
+  mutationQueueDir: rawMutationQueueDir ? validateMutationQueueDir(rawMutationQueueDir, vaultRoot) : ""
 };

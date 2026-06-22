@@ -3,4 +3,5 @@ kind: Kustomization
 resources:
   - pvc.yaml
   - deployment.yaml
+  - livesync-controller.yaml
   - service.yaml

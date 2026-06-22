@@ -66,6 +66,8 @@ spec:
               value: "true"
             - name: AUDIT_LOG_PATH
               value: /data/audit/obsidian-vault-mcp.audit.log
+            - name: MUTATION_QUEUE_DIR
+              value: /mutations
             - name: TRASH_DELETE
               value: "true"
             - name: TRASH_DIR
@@ -83,6 +85,8 @@ spec:
             - name: vault
               mountPath: /data/audit
               subPath: .audit
+            - name: mutations
+              mountPath: /mutations
           readinessProbe:
             httpGet:
               path: /healthz
@@ -106,3 +110,6 @@ spec:
         - name: vault
           persistentVolumeClaim:
             claimName: obsidian-vault-mcp
+        - name: mutations
+          persistentVolumeClaim:
+            claimName: obsidian-mutations

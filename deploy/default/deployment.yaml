@@ -37,12 +37,16 @@ spec:
                   key: MCP_TOKEN
             - name: MCP_REQUIRE_TOKEN
               value: "true"
+            - name: MUTATION_QUEUE_DIR
+              value: /mutations
           ports:
             - name: http
               containerPort: 8080
           volumeMounts:
             - name: vault
               mountPath: /data/vault
+            - name: mutations
+              mountPath: /mutations
           readinessProbe:
             httpGet:
               path: /healthz
@@ -66,3 +70,6 @@ spec:
         - name: vault
           persistentVolumeClaim:
             claimName: obsidian-vault-mcp
+        - name: mutations
+          persistentVolumeClaim:
+            claimName: obsidian-mutations

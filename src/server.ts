@@ -3,6 +3,7 @@ import { createHttpServer } from "./http.js";
 import { buildTools } from "./mcp/tools.js";
 import { McpHandler } from "./mcp/handler.js";
 import { FsVault } from "./vault/FsVault.js";
+import { MutationJournal } from "./vault/mutationJournal.js";
 
 const vault = new FsVault(config.vaultRoot, config.defaultWriteDir, {
   assetsDirName: config.assetsDirName,
@@ -12,7 +13,8 @@ const vault = new FsVault(config.vaultRoot, config.defaultWriteDir, {
   trashDelete: config.trashDelete,
   trashDir: config.trashDir,
   backupBeforeWrite: config.backupBeforeWrite,
-  backupDir: config.backupDir
+  backupDir: config.backupDir,
+  mutationJournal: config.mutationQueueDir ? new MutationJournal(config.mutationQueueDir) : undefined
 });
 await vault.init();
 

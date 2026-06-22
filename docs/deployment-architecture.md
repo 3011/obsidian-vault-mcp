@@ -10,20 +10,28 @@ This document describes the recommended production-style deployment pattern.
 Obsidian clients
   <-> LiveSync plugin
   <-> CouchDB
-  <-> livesync-cli daemon
+  <-> livesync-controller
   <-> shared vault PVC
   <-> obsidian-vault-mcp Service
   <-> private tunnel client
   <-> ChatGPT Connector
 ```
 
-The MCP server never needs to run Obsidian. It reads and writes a normal Markdown vault directory that is synchronized by `livesync-cli`.
+The MCP server never needs to run Obsidian. It reads and writes a normal Markdown vault directory plus a separate mutation WAL directory. The LiveSync controller serializes `livesync-cli daemon` and explicit delete/move mutations so LiveSync/CouchDB receives deleted revisions instead of relying on mirror scans.
 
 ## Kubernetes Components
 
-### LiveSync daemon
+### LiveSync controller
 
-The LiveSync CLI runs as a long-lived Deployment. It connects to CouchDB and mirrors the LiveSync database into a normal filesystem vault mounted from a PVC.
+The LiveSync controller runs as a long-lived Deployment. It mounts:
+
+```text
+/vault       # Markdown vault PVC
+/data        # LiveSync local DB and settings PVC
+/mutations   # MCP/controller mutation WAL PVC
+```
+
+It starts `livesync-cli daemon` for normal file watching. When a ready delete/move mutation appears, the controller stops the daemon, runs `livesync-cli rm` and `push`/`sync` serially, then starts the daemon again. Do not run an independent sidecar that calls `livesync-cli rm/push/sync` while the daemon is still active.
 
 Recommended initial settings:
 
@@ -33,7 +41,7 @@ CHOKIDAR_INTERVAL=1000
 livesync-cli ... daemon --interval 10
 ```
 
-Polling is conservative and works well for small personal vaults. Later, operators can tune node inotify limits or implement a CouchDB `_changes` based flow for lower latency.
+Polling is conservative and works well for small personal vaults. `mirror` should be kept for explicit maintenance windows only, not as the daily sync loop.
 
 ### Obsidian Vault MCP
 
@@ -54,6 +62,7 @@ kubectl -n YOUR_NAMESPACE apply -k deploy/personal-full-access
 The full-access profile enables all mutating tools and recovery features:
 
 ```text
+MUTATION_QUEUE_DIR=/mutations
 TRASH_DELETE=true
 BACKUP_BEFORE_WRITE=true
 ENABLE_AUDIT_LOG=true
@@ -104,7 +113,7 @@ Before production cutover:
 - `docker build -t obsidian-vault-mcp:ci .`
 - render Kubernetes profiles with `kubectl kustomize`;
 - validate LiveSync one-shot sync against an isolated CouchDB database;
-- validate LiveSync daemon against a shared vault PVC;
+- validate LiveSync controller against a shared vault PVC and mutation PVC;
 - validate MCP write/read/delete against the shared vault;
 - validate ChatGPT Connector through the private tunnel;
 - validate image asset and external reference note tools;

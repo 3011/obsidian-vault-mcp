@@ -2,6 +2,8 @@
 
 这个目录提供两套 Kubernetes 部署 profile，并且已经按资源类型拆分成多个文件，方便审查、覆盖和迁移到 Kustomize/Helm。
 
+LiveSync delete/move 文件复活问题的完整排查和修复记录见：[`docs/livesync-delete-move-wal-report.zh-CN.md`](../docs/livesync-delete-move-wal-report.zh-CN.md)。
+
 ## 目录结构
 
 ```text
@@ -9,11 +11,13 @@ deploy/
   default/
     pvc.yaml
     deployment.yaml
+    livesync-controller.yaml
     service.yaml
     kustomization.yaml
   personal-full-access/
     pvc.yaml
     deployment.yaml
+    livesync-controller.yaml
     service.yaml
     kustomization.yaml
 ```
@@ -30,6 +34,7 @@ deploy/
 - 从 Secret `obsidian-vault-mcp-token` 读取 `MCP_TOKEN`
 - 使用 `ClusterIP` Service
 - 默认镜像：`ghcr.io/3011/obsidian-vault-mcp:main`
+- LiveSync controller 默认镜像：`ghcr.io/3011/obsidian-livesync-controller:main`
 
 先创建 token Secret：
 
@@ -43,6 +48,7 @@ kubectl -n YOUR_NAMESPACE create secret generic obsidian-vault-mcp-token \
 ```bash
 kubectl -n YOUR_NAMESPACE apply -k deploy/default
 kubectl -n YOUR_NAMESPACE rollout status deploy/obsidian-vault-mcp
+kubectl -n YOUR_NAMESPACE rollout status deploy/obsidian-livesync-controller
 ```
 
 ### `personal-full-access`
@@ -64,6 +70,7 @@ kubectl -n YOUR_NAMESPACE rollout status deploy/obsidian-vault-mcp
 ```bash
 kubectl -n YOUR_NAMESPACE apply -k deploy/personal-full-access
 kubectl -n YOUR_NAMESPACE rollout status deploy/obsidian-vault-mcp
+kubectl -n YOUR_NAMESPACE rollout status deploy/obsidian-livesync-controller
 ```
 
 OpenAI tunnel-client 的 upstream MCP URL 指向：
@@ -83,13 +90,16 @@ http://obsidian-vault-mcp:80/mcp
 默认 PVC：
 
 ```text
-obsidian-vault-mcp
+obsidian-vault-mcp      -> /data/vault in MCP, /vault in controller
+obsidian-livesync-db    -> /data in controller
+obsidian-mutations      -> /mutations in MCP and controller
 ```
 
-容器内挂载：
+MCP 容器内挂载：
 
 ```text
 /data/vault
+/mutations
 ```
 
 全权限 profile 还把同一个 PVC 的 `.audit` 子目录挂载到：
@@ -102,6 +112,30 @@ obsidian-vault-mcp
 
 ```text
 .audit/obsidian-vault-mcp.audit.log
+```
+
+`MUTATION_QUEUE_DIR=/mutations` 会让 `vault_delete` 和 `vault_move` 先写 WAL mutation，再执行文件删除或移动。`/mutations` 不应放在 vault 内，也不应被 Obsidian/LiveSync 当普通笔记同步。
+
+## LiveSync controller
+
+controller 负责串行管理 LiveSync local DB：
+
+```text
+常规同步：启动 livesync-cli daemon
+delete：livesync-cli rm path -> sync
+move：livesync-cli rm oldPath -> push /vault/newPath newPath -> sync
+```
+
+不要同时运行旧的 `mirror -> sync -> mirror` 主循环，也不要再额外运行一个 sidecar 在 daemon 活跃时调用 `livesync-cli rm/push/sync`。`mirror` 只保留给人工初始化或维护窗口。
+
+controller 镜像可用本仓库的 wrapper Dockerfile 构建：
+
+```bash
+docker build \
+  -f livesync-controller/Dockerfile \
+  --build-arg LIVESYNC_CLI_IMAGE=YOUR_LIVESYNC_CLI_IMAGE \
+  -t ghcr.io/3011/obsidian-livesync-controller:main \
+  livesync-controller
 ```
 
 ## 恢复能力
@@ -117,6 +151,7 @@ BACKUP_BEFORE_WRITE=true
 
 - `vault_delete` 不直接永久删除，而是移动到 `.trash/`
 - `vault_write`、`vault_append`、`vault_patch`、`vault_move`、`vault_delete` 前会按需写 `.backups/`
+- 启用 `MUTATION_QUEUE_DIR` 后，`vault_delete` 和 `vault_move` 会额外写 mutation WAL，供 LiveSync controller 提交 DB 删除/移动语义
 - `.trash/` 和 `.backups/` 默认被 MCP 路径保护逻辑屏蔽，不能通过普通 note 工具读取或改写
 
 生产切换前建议实际演练一次：

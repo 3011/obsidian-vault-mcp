@@ -4,6 +4,7 @@ import { atomicWriteFile } from "./atomicWrite.js";
 import { audit } from "./audit.js";
 import { FileLocks } from "./FileLocks.js";
 import { PathGuard } from "./pathGuard.js";
+import { MutationJournal } from "./mutationJournal.js";
 import { getDocumentMap } from "../markdown/documentMap.js";
 import { frontmatterTags, parseFrontmatter } from "../markdown/frontmatter.js";
 import { patchMarkdown, type PatchArgs } from "../markdown/patch.js";
@@ -36,6 +37,7 @@ export class FsVault {
   private readonly trashDir: string;
   private readonly backupBeforeWrite: boolean;
   private readonly backupDir: string;
+  private readonly mutationJournal: MutationJournal | undefined;
 
   constructor(root: string, defaultWriteDir: string, options: {
     assetsDirName?: string;
@@ -46,6 +48,7 @@ export class FsVault {
     trashDir?: string;
     backupBeforeWrite?: boolean;
     backupDir?: string;
+    mutationJournal?: MutationJournal | undefined;
   } = {}) {
     this.guard = new PathGuard(root, defaultWriteDir);
     this.assetsDirName = sanitizeDirName(options.assetsDirName || "assets");
@@ -56,10 +59,12 @@ export class FsVault {
     this.trashDir = sanitizeDirName(options.trashDir || ".trash");
     this.backupBeforeWrite = options.backupBeforeWrite ?? true;
     this.backupDir = sanitizeDirName(options.backupDir || ".backups");
+    this.mutationJournal = options.mutationJournal;
   }
 
   async init(): Promise<void> {
     await this.guard.ensureRoot();
+    await this.mutationJournal?.init();
   }
 
   async list(dirPath = ""): Promise<string[]> {
@@ -223,10 +228,14 @@ export class FsVault {
           const trashRelative = await this.allocateRecoveryPath(this.trashDir, relative, "vault_delete");
           const trashAbsolute = this.guard.resolveCreate(trashRelative);
           await mkdir(path.dirname(trashAbsolute), { recursive: true });
+          const mutation = await this.mutationJournal?.createDelete(relative);
           await rename(absolute, trashAbsolute);
+          await mutation?.markReady({ trashPath: trashRelative });
           await audit("vault_delete", "success", { path: relative, trashPath: trashRelative });
         } else {
+          const mutation = await this.mutationJournal?.createDelete(relative);
           await rm(absolute);
+          await mutation?.markReady();
           await audit("vault_delete", "success", { path: relative, permanent: true });
         }
       } catch (error) {
@@ -254,8 +263,10 @@ export class FsVault {
         await this.backupExisting(sourceRelative, "vault_move");
         if (allowOverwrite) await this.backupExisting(destinationRelative, "vault_move_overwrite");
         await mkdir(path.dirname(destinationAbsolute), { recursive: true });
+        const mutation = await this.mutationJournal?.createMove(sourceRelative, destinationRelative, allowOverwrite);
         if (allowOverwrite) await rm(destinationAbsolute, { force: true });
         await rename(sourceAbsolute, destinationAbsolute);
+        await mutation?.markReady();
         await audit("vault_move", "success", { path: sourceRelative, destination: destinationRelative, allowOverwrite });
         return destinationRelative;
       } catch (error) {
