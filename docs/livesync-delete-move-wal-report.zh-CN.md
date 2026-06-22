@@ -1,5 +1,7 @@
 # LiveSync Delete/Move 文件复活问题报告
 
+[English](livesync-delete-move-wal-report.md)
+
 ## 摘要
 
 在 headless Obsidian + LiveSync CLI + MCP 的部署中，曾出现 `vault_move` 返回成功后，源路径和目标路径同时存在的问题。排查确认：MCP 文件系统移动本身成功，源文件是后续被 LiveSync 恢复出来的。
@@ -72,7 +74,7 @@ CouchDB 复制 deleted revision
 
 ### 目录分离
 
-主环境使用三个目录：
+目标部署使用三个目录：
 
 ```text
 /vault       Obsidian vault 文件
@@ -166,15 +168,8 @@ newPath deleted
 
 - 新增 `obsidian-mutations` PVC。
 - MCP Deployment 挂载 `/mutations` 并设置 `MUTATION_QUEUE_DIR=/mutations`。
-- 主环境 `obsidian-livesync` Deployment 已从旧 mirror loop 切换为 controller 镜像。
+- LiveSync Deployment 从旧 mirror loop 切换为 controller 镜像。
 - 旧的 `mirror -> sync -> mirror` 不再作为日常主链路。
-
-主环境当前镜像：
-
-```text
-obsidian-vault-mcp: 10.10.0.1:30500/obsidian-vault-mcp:dev
-obsidian-livesync:  10.10.0.1:30500/obsidian-livesync-controller:dev
-```
 
 ## 验证结果
 
@@ -188,7 +183,7 @@ kubectl kustomize deploy/default
 kubectl kustomize deploy/personal-full-access
 ```
 
-主环境验证：
+验证环境检查：
 
 - `obsidian-vault-mcp` rollout 成功。
 - `obsidian-livesync` rollout 成功。

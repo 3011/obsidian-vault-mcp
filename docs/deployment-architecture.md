@@ -4,6 +4,8 @@
 
 This document describes the recommended production-style deployment pattern.
 
+For the full investigation and fix record for LiveSync delete/move file resurrection, see [LiveSync Delete/Move Resurrection Report](livesync-delete-move-wal-report.md).
+
 ## Recommended Topology
 
 ```text

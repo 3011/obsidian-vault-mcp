@@ -192,4 +192,4 @@ http://obsidian-vault-mcp:80/mcp
 
 在主 vault 上使用前，请先阅读 `docs/personal-full-access.zh-CN.md`。
 
-运行时验证已在私有 k3s profile 中完成，包含 LiveSync CLI、CouchDB、OpenAI Secure MCP Tunnel 和 ChatGPT Connector。ChatGPT 侧 tunnel 工具矩阵已通过：`vault_list`、`vault_read`、`vault_write`、`vault_append`、`vault_patch`、`vault_delete`、`vault_move`、`search_simple`、`tag_list`、`append_to_inbox`、`vault_upload_image_asset`、`vault_create_note_with_assets`、`vault_create_external_reference_note`。
+运行时验证已在隔离部署 profile 中完成，包含 LiveSync CLI、CouchDB、OpenAI Secure MCP Tunnel 和 ChatGPT Connector。ChatGPT 侧 tunnel 工具矩阵已通过：`vault_list`、`vault_read`、`vault_write`、`vault_append`、`vault_patch`、`vault_delete`、`vault_move`、`search_simple`、`tag_list`、`append_to_inbox`、`vault_upload_image_asset`、`vault_create_note_with_assets`、`vault_create_external_reference_note`。

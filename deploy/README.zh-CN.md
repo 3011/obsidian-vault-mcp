@@ -162,7 +162,7 @@ BACKUP_BEFORE_WRITE=true
 
 ## 已验证状态
 
-当前项目已在私有 k3s 测试环境验证：
+当前项目已在隔离测试环境验证：
 
 - LiveSync CLI daemon + CouchDB 测试库
 - OpenAI Secure MCP Tunnel
