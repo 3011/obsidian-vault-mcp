@@ -20,16 +20,21 @@ export class PathGuard {
   }
 
   validateFilePath(rawPath: unknown, { allowMissing = false }: { allowMissing?: boolean } = {}): string {
-    if (typeof rawPath !== "string" || rawPath.trim() === "") throw new Error("path is required");
-    if (rawPath.includes("\0")) throw new Error("path contains a NUL byte");
-    if (path.isAbsolute(rawPath)) throw new Error("absolute paths are not allowed");
-    const normalized = path.posix.normalize(rawPath.replaceAll("\\", "/")).replace(/^\/+/, "");
-    if (normalized === "." || normalized.startsWith("../") || normalized.includes("/../")) {
-      throw new Error("path traversal is not allowed");
-    }
+    const normalized = this.validateVaultFilePath(rawPath);
     if (!normalized.endsWith(".md")) throw new Error("only Markdown .md files are allowed");
-    this.assertAllowedParts(normalized);
     if (!allowMissing && normalized.endsWith("/")) throw new Error("file path must not end with /");
+    return normalized;
+  }
+
+  validateVaultPath(rawPath: unknown): string {
+    const normalized = this.validateRelativePath(rawPath, "path").replace(/\/+$/g, "");
+    if (!normalized) throw new Error("path is required");
+    return normalized;
+  }
+
+  validateVaultFilePath(rawPath: unknown): string {
+    const normalized = this.validateRelativePath(rawPath, "path");
+    if (normalized.endsWith("/")) throw new Error("file path must not end with /");
     return normalized;
   }
 
@@ -46,19 +51,21 @@ export class PathGuard {
   }
 
   validateDestination(rawDestination: unknown, sourcePath: string): string {
-    if (typeof rawDestination !== "string" || rawDestination.trim() === "") throw new Error("destination is required");
-    if (rawDestination.includes("\0")) throw new Error("destination contains a NUL byte");
-    if (path.isAbsolute(rawDestination)) throw new Error("destination must be relative");
-    const normalized = path.posix.normalize(rawDestination.replaceAll("\\", "/")).replace(/^\/+/, "");
-    if (normalized === "." || normalized.startsWith("../") || normalized.includes("/../")) {
-      throw new Error("destination traversal is not allowed");
-    }
-    this.assertAllowedParts(normalized.replace(/\/+$/, ""));
+    const normalized = this.validateRelativePath(rawDestination, "destination");
     if (normalized.endsWith("/")) {
       const filename = path.posix.basename(sourcePath);
       return `${normalized}${filename}`;
     }
     if (!normalized.endsWith(".md")) throw new Error("destination must be a Markdown .md file or directory ending with /");
+    return normalized;
+  }
+
+  validateVaultDestination(rawDestination: unknown, sourcePath: string): string {
+    const normalized = this.validateRelativePath(rawDestination, "destination");
+    if (normalized.endsWith("/")) {
+      const filename = path.posix.basename(sourcePath);
+      return `${normalized}${filename}`;
+    }
     return normalized;
   }
 
@@ -98,6 +105,15 @@ export class PathGuard {
     return real;
   }
 
+  async resolveExistingPath(relativePath: string): Promise<{ absolute: string; type: "file" | "directory" }> {
+    const absolute = this.resolveCreate(relativePath);
+    const fileStat = await lstat(absolute);
+    if (!fileStat.isFile() && !fileStat.isDirectory()) throw new Error("path is not a regular file or directory");
+    const real = await realpath(absolute);
+    this.assertInsideRoot(real);
+    return { absolute, type: fileStat.isDirectory() ? "directory" : "file" };
+  }
+
   relative(absolutePath: string): string {
     return path.relative(this.root, absolutePath).split(path.sep).join("/");
   }
@@ -123,6 +139,18 @@ export class PathGuard {
     if (base === ".DS_Store" || FORBIDDEN_SUFFIXES.some((suffix) => base.endsWith(suffix))) {
       throw new Error("temporary files are not allowed");
     }
+  }
+
+  private validateRelativePath(rawPath: unknown, label: "path" | "destination"): string {
+    if (typeof rawPath !== "string" || rawPath.trim() === "") throw new Error(`${label} is required`);
+    if (rawPath.includes("\0")) throw new Error(`${label} contains a NUL byte`);
+    if (path.isAbsolute(rawPath)) throw new Error(label === "destination" ? "destination must be relative" : "absolute paths are not allowed");
+    const normalized = path.posix.normalize(rawPath.replaceAll("\\", "/")).replace(/^\/+/, "");
+    if (normalized === "." || normalized.startsWith("../") || normalized.includes("/../")) {
+      throw new Error(label === "destination" ? "destination traversal is not allowed" : "path traversal is not allowed");
+    }
+    this.assertAllowedParts(normalized.replace(/\/+$/, ""));
+    return normalized;
   }
 
   private assertInsideRoot(absolutePath: string): void {

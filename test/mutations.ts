@@ -49,6 +49,17 @@ try {
   assert.equal(moveRecord.allowOverwrite, false);
   await stat(path.join(vault, "98-Inbox", "moved.md"));
 
+  await mkdir(path.join(vault, "98-Inbox", "assets"), { recursive: true });
+  await writeFile(path.join(vault, "98-Inbox", "assets", "delete.png"), "asset\n", "utf8");
+  await callTool(walServer.port, "vault_delete", { path: "98-Inbox/assets/delete.png" });
+  const assetDeleteRecord = (await readyMutations(mutations)).find((record: any) => record.op === "delete" && record.path === "98-Inbox/assets/delete.png");
+  assert(assetDeleteRecord);
+  await writeFile(path.join(vault, "98-Inbox", "assets", "move.png"), "asset\n", "utf8");
+  await callTool(walServer.port, "vault_move", { path: "98-Inbox/assets/move.png", destination: "98-Inbox/assets/moved.png" });
+  const assetMoveRecord = (await readyMutations(mutations)).find((record: any) => record.op === "move" && record.oldPath === "98-Inbox/assets/move.png");
+  assert(assetMoveRecord);
+  assert.equal(assetMoveRecord.newPath, "98-Inbox/assets/moved.png");
+
   await assertWalFailureDoesNotDelete(root);
   await assertWalFailureDoesNotMove(root);
 

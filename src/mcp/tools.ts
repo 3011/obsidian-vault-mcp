@@ -2,32 +2,54 @@ import { config } from "../config.js";
 import { FsVault } from "../vault/FsVault.js";
 import type { Tool } from "./types.js";
 
-const mdPath = { type: "string", description: "Vault-relative Markdown .md path." };
+const mdPath = { type: "string", description: "Vault-relative Markdown note path ending in .md. Absolute paths and traversal are rejected." };
+const vaultPath = { type: "string", description: "Vault-relative file path. Absolute paths and traversal are rejected." };
 
 export function buildTools(vault: FsVault): Tool[] {
   const tools: Tool[] = [
     {
       name: "vault_list",
       title: "Vault List",
-      description: "List files and subdirectories inside a vault directory. Directory entries end with '/'.",
+      description: "List regular files and subdirectories inside a vault directory, including Markdown notes and attachments such as images. Directory entries end with '/'.",
       inputSchema: {
         type: "object",
-        properties: { path: { type: "string", description: "Directory path relative to the vault root." } },
+        properties: { path: { type: "string", description: "Vault-relative directory path to list. Omit or pass an empty string for the vault root." } },
         additionalProperties: false
       },
       handler: async (args) => ({ files: await vault.list(String(args.path ?? "")) })
     },
     {
-      name: "vault_read",
-      title: "Vault Read",
-      description: "Read a Markdown note and metadata. With targetType and target, read only a heading, block, or frontmatter field.",
+      name: "vault_list_detailed",
+      title: "Vault List Detailed",
+      description: "Return structured facts for a vault path without modifying anything. Distinguishes missing paths, files, empty directories, non-empty directories, denied paths, and skipped entries; includes attachment metadata.",
       inputSchema: {
         type: "object",
         properties: {
-          path: mdPath,
-          targetType: { type: "string", enum: ["heading", "block", "frontmatter"] },
-          target: { type: "string" },
-          targetDelimiter: { type: "string", default: "::" }
+          path: { type: "string", description: "Vault-relative file or directory path. Omit or pass an empty string for the vault root." },
+          recursive: { type: "boolean", default: false, description: "Set true to list nested entries recursively." },
+          includeSha256: { type: "boolean", default: false, description: "Set true to compute SHA-256 for files. This may add IO cost for large attachments." }
+        },
+        additionalProperties: false
+      },
+      handler: async (args) => {
+        const input: Parameters<FsVault["listDetailed"]>[0] = {};
+        if (typeof args.path === "string") input.path = args.path;
+        if (typeof args.recursive === "boolean") input.recursive = args.recursive;
+        if (typeof args.includeSha256 === "boolean") input.includeSha256 = args.includeSha256;
+        return vault.listDetailed(input);
+      }
+    },
+    {
+      name: "vault_read",
+      title: "Vault Read",
+      description: "Read a Markdown note with metadata, or read a supported non-Markdown text file. Binary files and targeted reads on non-Markdown files are rejected.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          path: vaultPath,
+          targetType: { type: "string", enum: ["heading", "block", "frontmatter"], description: "Optional Markdown-only target kind to read instead of the whole note." },
+          target: { type: "string", description: "Heading text, block ID, or frontmatter key to read when targetType is set." },
+          targetDelimiter: { type: "string", default: "::", description: "Delimiter used when reading frontmatter-like inline fields." }
         },
         required: ["path"],
         additionalProperties: false
@@ -43,7 +65,7 @@ export function buildTools(vault: FsVault): Tool[] {
     {
       name: "vault_write",
       title: "Vault Write",
-      description: "Create or overwrite a Markdown file. This is intentionally exposed because the operator accepts the risk.",
+      description: "Create or overwrite a Markdown note. This tool is Markdown-only and does not write binary attachments.",
       inputSchema: {
         type: "object",
         properties: { path: mdPath, content: { type: "string", description: "Full Markdown content." } },
@@ -58,7 +80,7 @@ export function buildTools(vault: FsVault): Tool[] {
     {
       name: "vault_append",
       title: "Vault Append",
-      description: "Append Markdown content to a note, creating the file if missing.",
+      description: "Append Markdown content to a note, creating the Markdown note if missing.",
       inputSchema: {
         type: "object",
         properties: { path: mdPath, content: { type: "string", description: "Markdown content to append." } },
@@ -73,21 +95,21 @@ export function buildTools(vault: FsVault): Tool[] {
     {
       name: "vault_patch",
       title: "Vault Patch",
-      description: "Patch a heading, block reference, or frontmatter field with replace, prepend, or append.",
+      description: "Patch a Markdown note heading, block reference, or frontmatter field with replace, prepend, or append.",
       inputSchema: {
         type: "object",
         properties: {
           path: mdPath,
-          targetType: { type: "string", enum: ["heading", "block", "frontmatter"] },
-          target: { type: "string" },
-          operation: { type: "string", enum: ["replace", "prepend", "append"] },
-          content: {},
-          contentType: { type: "string", enum: ["text/markdown", "application/json"] },
-          createTargetIfMissing: { type: "boolean" },
-          trimTargetWhitespace: { type: "boolean" },
-          rejectIfContentPreexists: { type: "boolean" },
-          targetDelimiter: { type: "string", default: "::" },
-          targetScope: { type: "string", enum: ["content", "marker", "markerAndContent"], default: "content" }
+          targetType: { type: "string", enum: ["heading", "block", "frontmatter"], description: "Markdown target kind to patch." },
+          target: { type: "string", description: "Heading text, block ID, or frontmatter key to patch." },
+          operation: { type: "string", enum: ["replace", "prepend", "append"], description: "How to apply content to the selected target." },
+          content: { description: "Replacement or inserted content. Use a JSON value with contentType application/json for frontmatter patches." },
+          contentType: { type: "string", enum: ["text/markdown", "application/json"], description: "Content interpretation. Defaults to Markdown/text behavior when omitted." },
+          createTargetIfMissing: { type: "boolean", description: "Create the heading, block, or frontmatter key when it does not exist." },
+          trimTargetWhitespace: { type: "boolean", description: "Trim whitespace around the existing target content before patching." },
+          rejectIfContentPreexists: { type: "boolean", description: "Reject the patch if the exact content is already present in the target." },
+          targetDelimiter: { type: "string", default: "::", description: "Delimiter used for frontmatter-like inline fields." },
+          targetScope: { type: "string", enum: ["content", "marker", "markerAndContent"], default: "content", description: "For block targets, choose whether to patch content, the marker line, or both." }
         },
         required: ["path", "targetType", "target", "operation", "content"],
         additionalProperties: false
@@ -125,10 +147,10 @@ export function buildTools(vault: FsVault): Tool[] {
     {
       name: "vault_delete",
       title: "Vault Delete",
-      description: "Delete a Markdown file from the vault.",
+      description: "Delete a vault file, including attachments, or delete an empty directory. Non-empty directories are rejected.",
       inputSchema: {
         type: "object",
-        properties: { path: mdPath },
+        properties: { path: { type: "string", description: "Vault-relative file path, attachment path, or empty directory path. Non-empty directories are rejected." } },
         required: ["path"],
         additionalProperties: false
       },
@@ -140,13 +162,13 @@ export function buildTools(vault: FsVault): Tool[] {
     {
       name: "vault_move",
       title: "Vault Move",
-      description: "Move or rename a Markdown file. If destination ends with '/', the original filename is preserved.",
+      description: "Move or rename a vault file, including attachments. If destination ends with '/', the original filename is preserved. Markdown files cannot be renamed to non-Markdown paths, or vice versa.",
       inputSchema: {
         type: "object",
         properties: {
-          path: mdPath,
-          destination: { type: "string", description: "Destination .md path or directory ending with /." },
-          allowOverwrite: { type: "boolean", default: false }
+          path: vaultPath,
+          destination: { type: "string", description: "Destination vault-relative file path, or a directory ending with '/' to preserve the original filename." },
+          allowOverwrite: { type: "boolean", default: false, description: "Set true to replace an existing destination file." }
         },
         required: ["path", "destination"],
         additionalProperties: false
@@ -159,7 +181,7 @@ export function buildTools(vault: FsVault): Tool[] {
     {
       name: "vault_get_document_map",
       title: "Vault Get Document Map",
-      description: "Return headings, block references, frontmatter fields, links, embeds, and tags for a note.",
+      description: "Return headings, block references, frontmatter fields, links, embeds, and tags for a Markdown note.",
       inputSchema: {
         type: "object",
         properties: { path: mdPath },
@@ -171,18 +193,90 @@ export function buildTools(vault: FsVault): Tool[] {
     {
       name: "search_simple",
       title: "Search Simple",
-      description: "Search Markdown notes with a case-insensitive substring search.",
+      description: "Search Markdown note paths and contents with a case-insensitive substring search, returning snippets with context.",
       inputSchema: {
         type: "object",
         properties: {
-          query: { type: "string" },
-          contextLength: { type: "number", default: 100 },
-          limit: { type: "number", default: 100 }
+          query: { type: "string", description: "Case-insensitive substring to search for in Markdown paths and note contents." },
+          contextLength: { type: "number", default: 100, description: "Approximate number of characters to include around each content match." },
+          limit: { type: "number", default: 100, description: "Maximum number of matches to return." }
         },
         required: ["query"],
         additionalProperties: false
       },
       handler: async (args) => vault.searchSimple(String(args.query), Number(args.contextLength ?? 100), Number(args.limit ?? 100))
+    },
+    {
+      name: "search_query",
+      title: "Search Query",
+      description: "Search Markdown notes with structured filters for path glob, tag, frontmatter equality, and content substring. All provided filters are combined with AND.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          pathGlob: { type: "string", description: "Optional glob for vault-relative Markdown paths, for example 98-Inbox/** or **/project-*.md." },
+          tag: { type: "string", description: "Optional tag filter, with or without leading #." },
+          frontmatter: { type: "object", description: "Optional frontmatter equality filters, matched by key and JSON-equivalent value.", additionalProperties: true },
+          content: { type: "string", description: "Optional case-insensitive substring to match in note content." },
+          limit: { type: "number", default: 100, description: "Maximum number of matching notes to return." }
+        },
+        additionalProperties: false
+      },
+      handler: async (args) => {
+        const query: Parameters<FsVault["searchQuery"]>[0] = {};
+        if (typeof args.pathGlob === "string") query.pathGlob = args.pathGlob;
+        if (typeof args.tag === "string") query.tag = args.tag;
+        if (args.frontmatter && typeof args.frontmatter === "object" && !Array.isArray(args.frontmatter)) query.frontmatter = args.frontmatter as Record<string, unknown>;
+        if (typeof args.content === "string") query.content = args.content;
+        if (typeof args.limit === "number") query.limit = args.limit;
+        return vault.searchQuery(query);
+      }
+    },
+    {
+      name: "find_asset_references",
+      title: "Find Asset References",
+      description: "Read-only, conservative asset reference analysis for one or more vault-relative asset paths. Returns evidence, ambiguity, and trashSafety; when the server cannot confidently determine an asset is unused, trashSafety is 'unknown' rather than 'safe'.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          assetPaths: {
+            type: "array",
+            description: "Vault-relative asset paths to analyze. Use an array even when checking one asset.",
+            items: vaultPath,
+            minItems: 1
+          },
+          scope: { type: "string", description: "Optional vault-relative directory scope for Markdown scanning. Scoped scans can never return trashSafety='safe'." }
+        },
+        required: ["assetPaths"],
+        additionalProperties: false
+      },
+      handler: async (args) => {
+        const input: Parameters<FsVault["findAssetReferences"]>[0] = { assetPaths: parseStringArray(args.assetPaths, "assetPaths") };
+        if (typeof args.scope === "string") input.scope = args.scope;
+        return vault.findAssetReferences(input);
+      }
+    },
+    {
+      name: "asset_audit",
+      title: "Asset Audit",
+      description: "Read-only asset audit for a vault directory. Combines detailed listing with conservative reference analysis; it does not move, delete, or rewrite files. candidateOrphan means no structured reference was found in the scan, while trashSafety is the stricter safe/unsafe/unknown server judgment.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          root: { type: "string", description: "Vault-relative directory containing assets to audit." },
+          recursive: { type: "boolean", default: true, description: "Set true to audit nested assets under root." },
+          scope: { type: "string", description: "Optional vault-relative directory scope for Markdown reference scanning. Scoped scans can never return trashSafety='safe'." },
+          includeSha256: { type: "boolean", default: false, description: "Set true to compute SHA-256 for audited assets. This may add IO cost for large attachments." }
+        },
+        required: ["root"],
+        additionalProperties: false
+      },
+      handler: async (args) => {
+        const input: Parameters<FsVault["assetAudit"]>[0] = { root: String(args.root ?? "") };
+        if (typeof args.recursive === "boolean") input.recursive = args.recursive;
+        if (typeof args.scope === "string") input.scope = args.scope;
+        if (typeof args.includeSha256 === "boolean") input.includeSha256 = args.includeSha256;
+        return vault.assetAudit(input);
+      }
     },
     {
       name: "tag_list",
@@ -194,11 +288,11 @@ export function buildTools(vault: FsVault): Tool[] {
     {
       name: "append_to_inbox",
       title: "Append To Inbox",
-      description: "Append Markdown content to a note under the default inbox directory.",
+      description: "Append Markdown content to a note under the configured default inbox directory.",
       inputSchema: {
         type: "object",
         properties: {
-          title: { type: "string", description: "Inbox note title or filename." },
+          title: { type: "string", description: "Inbox note title or filename. If omitted, the default inbox note name is used." },
           content: { type: "string", description: "Markdown content to append." }
         },
         required: ["content"],
@@ -212,17 +306,17 @@ export function buildTools(vault: FsVault): Tool[] {
     {
       name: "vault_upload_image_asset",
       title: "Vault Upload Image Asset",
-      description: "Upload a small image asset into the vault and return an Obsidian embed link. Only image assets are accepted.",
+      description: "Upload a small image asset into an allowed vault assets directory and return an Obsidian embed link. Only image MIME types are accepted.",
       inputSchema: {
         type: "object",
         properties: {
-          filename: { type: "string" },
-          mimeType: { type: "string", enum: ["image/png", "image/jpeg", "image/webp", "image/gif"] },
-          contentBase64: { type: "string" },
+          filename: { type: "string", description: "Original image filename. The extension must match the MIME type." },
+          mimeType: { type: "string", enum: ["image/png", "image/jpeg", "image/webp", "image/gif"], description: "Image MIME type for the decoded bytes." },
+          contentBase64: { type: "string", description: "Base64-encoded image bytes." },
           expectedSha256: { type: "string", description: "Optional expected SHA-256 of the original decoded image bytes. Recommended for lossless/original preservation." },
           expectedSize: { type: "integer", minimum: 1, description: "Optional expected decoded image byte size. Recommended with expectedSha256 for lossless/original preservation." },
           preserveOriginal: { type: "boolean", description: "Set true when the upload must preserve original bytes; this requires expectedSha256 and expectedSize in the default integrity mode." },
-          dir: { type: "string", description: "Optional vault-relative asset directory. Defaults to the inbox assets directory." }
+          dir: { type: "string", description: "Optional vault-relative asset directory. Defaults to the inbox assets directory and must be an allowed assets path." }
         },
         required: ["filename", "mimeType", "contentBase64"],
         additionalProperties: false
@@ -248,15 +342,16 @@ export function buildTools(vault: FsVault): Tool[] {
         type: "object",
         properties: {
           path: mdPath,
-          content: { type: "string" },
+          content: { type: "string", description: "Markdown content. Use placeholders like {{asset:0}} to embed uploaded assets by index." },
           assets: {
             type: "array",
+            description: "Image assets to upload beside the note. Asset indexes correspond to {{asset:n}} placeholders in content.",
             items: {
               type: "object",
               properties: {
-                filename: { type: "string" },
-                mimeType: { type: "string", enum: ["image/png", "image/jpeg", "image/webp", "image/gif"] },
-                contentBase64: { type: "string" },
+                filename: { type: "string", description: "Original image filename. The extension must match the MIME type." },
+                mimeType: { type: "string", enum: ["image/png", "image/jpeg", "image/webp", "image/gif"], description: "Image MIME type for the decoded bytes." },
+                contentBase64: { type: "string", description: "Base64-encoded image bytes." },
                 expectedSha256: { type: "string", description: "Optional expected SHA-256 of the original decoded image bytes. Recommended for lossless/original preservation." },
                 expectedSize: { type: "integer", minimum: 1, description: "Optional expected decoded image byte size. Recommended with expectedSha256 for lossless/original preservation." },
                 preserveOriginal: { type: "boolean", description: "Set true when the upload must preserve original bytes; this requires expectedSha256 and expectedSize in the default integrity mode." }
@@ -274,29 +369,30 @@ export function buildTools(vault: FsVault): Tool[] {
     {
       name: "vault_create_external_reference_note",
       title: "Vault Create External Reference Note",
-      description: "Create a structured Markdown note that references external source files without uploading them into the vault.",
+      description: "Create a structured Markdown note that references external source files without uploading those files into the vault.",
       inputSchema: {
         type: "object",
         properties: {
           path: mdPath,
-          title: { type: "string" },
+          title: { type: "string", description: "Display title for the generated reference note." },
           references: {
             type: "array",
+            description: "External source references to record in the note without copying the source files.",
             items: {
               type: "object",
               properties: {
-                label: { type: "string" },
-                location: { type: "string" },
-                type: { type: "string" },
-                note: { type: "string" }
+                label: { type: "string", description: "Human-readable source label." },
+                location: { type: "string", description: "Source location, such as a local path, URL, or identifier." },
+                type: { type: "string", description: "Optional source type, such as pdf, image, web, or dataset." },
+                note: { type: "string", description: "Optional note about this source." }
               },
               required: ["label", "location"],
               additionalProperties: false
             }
           },
-          summary: { type: "string" },
-          keyFindings: { type: "array", items: { type: "string" } },
-          nextActions: { type: "array", items: { type: "string" } }
+          summary: { type: "string", description: "Optional short summary to include in the generated note." },
+          keyFindings: { type: "array", description: "Optional bullet-style findings to include.", items: { type: "string" } },
+          nextActions: { type: "array", description: "Optional follow-up actions to include.", items: { type: "string" } }
         },
         required: ["path", "title", "references"],
         additionalProperties: false
@@ -388,6 +484,14 @@ function parseExternalReferences(value: unknown): Array<{ label: string; locatio
 function parseOptionalStringArray(value: unknown, name: string): string[] | undefined {
   if (value == null) return undefined;
   if (!Array.isArray(value)) throw new Error(`${name} must be an array`);
+  return value.map((item, index) => {
+    if (typeof item !== "string") throw new Error(`${name}[${index}] must be a string`);
+    return item;
+  });
+}
+
+function parseStringArray(value: unknown, name: string): string[] {
+  if (!Array.isArray(value) || value.length === 0) throw new Error(`${name} must be a non-empty array`);
   return value.map((item, index) => {
     if (typeof item !== "string") throw new Error(`${name}[${index}] must be a string`);
     return item;

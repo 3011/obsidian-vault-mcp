@@ -14,15 +14,19 @@ It does not depend on Obsidian, plugin APIs, command palette, active files, or G
 
 ## Tools
 
-- `vault_list`: list Markdown files and folders.
-- `vault_read`: read full note metadata/content or a heading, block, or frontmatter target.
+- `vault_list`: list vault files and folders.
+- `vault_list_detailed`: return structured path facts, file metadata, attachment markers, warnings, and scan IDs.
+- `vault_read`: read full note metadata/content or a heading, block, or frontmatter target; read supported text files.
 - `vault_write`: create or overwrite a Markdown file.
 - `vault_append`: append content to a Markdown file, creating it if missing.
 - `vault_patch`: patch heading, block, or frontmatter targets.
-- `vault_delete`: delete a Markdown file.
-- `vault_move`: move or rename a Markdown file.
+- `vault_delete`: delete a vault file or empty folder.
+- `vault_move`: move or rename a vault file.
 - `vault_get_document_map`: list headings, block refs, frontmatter fields, links, embeds, and tags.
 - `search_simple`: full-vault substring search with context.
+- `search_query`: structured Markdown search by path glob, tag, frontmatter equality, and content substring.
+- `find_asset_references`: read-only reference analysis for one or more asset paths with conservative `trashSafety`.
+- `asset_audit`: read-only directory-level asset audit combining detailed listing and reference analysis.
 - `tag_list`: list tags with counts, including nested tag parent counts.
 - `append_to_inbox`: append content to a note under the default inbox directory.
 - `vault_upload_image_asset`: upload a small image asset and return an Obsidian embed link.
@@ -33,17 +37,22 @@ Destructive tools are intentionally exposed because the operator accepts that ri
 
 ## Implementation Notes
 
-- `vault_read` returns content, parsed frontmatter, tags, file stat, links, and embeds. It can also read a heading, nested heading path, block reference, or frontmatter field.
+- `vault_read` returns content, parsed frontmatter, tags, file stat, links, and embeds for Markdown files. It can also read a heading, nested heading path, block reference, or frontmatter field. For non-Markdown text files, it returns content and stat; binary files are rejected.
+- `vault_list_detailed` distinguishes missing paths, files, empty directories, non-empty directories, denied paths, and skipped entries. It can recurse and optionally compute SHA-256 hashes.
+- `find_asset_references` supports Obsidian wikilinks, Markdown image links, and common HTML `<img src>` references. It ignores fenced code blocks and inline code. It reports `scanCompleteness`, `candidateOrphan`, `trashSafety`, evidence, and warnings.
+- `asset_audit` is read-only and does not move, delete, or rewrite files. It combines `vault_list_detailed` and `find_asset_references`; `candidateOrphan=true` means no supported structured reference was found, while `trashSafety=safe` is only returned for full-vault scans with no references, ambiguity, unresolved matches, unsupported matches, duplicates, or relevant warnings. Uncertain cases return `trashSafety=unknown`.
 - `vault_write` atomically creates or overwrites Markdown files.
 - `vault_append` creates missing Markdown files and preserves existing content.
 - `vault_patch` supports heading, block, and frontmatter targets with `replace`, `prepend`, and `append`; it also supports `createTargetIfMissing`, `rejectIfContentPreexists`, `trimTargetWhitespace`, `targetDelimiter`, `contentType`, and `targetScope`.
 - Duplicate heading paths currently follow `markdown-patch` map behavior: the later matching heading wins. Prefer unique heading paths when using `vault_patch` or pass a more specific nested path.
-- `vault_move` supports destination directories ending in `/` and optional overwrite.
+- `vault_delete` deletes vault files and empty directories. Non-empty directories are rejected.
+- `vault_move` supports destination directories ending in `/` and optional overwrite for vault files. It does not allow renaming between Markdown and non-Markdown extensions.
 - `vault_upload_image_asset` accepts PNG, JPEG, WebP, and GIF only; it verifies MIME, extension, size, basic magic bytes, and requires the target directory to be named `assets`.
 - `vault_upload_image_asset` and `vault_create_note_with_assets` accept optional `expectedSha256`, `expectedSize`, and `preserveOriginal` fields. Use them when the caller needs to prove original byte preservation.
 - `vault_create_note_with_assets` stores images under a note-local `assets/` directory and replaces `{{asset:n}}` placeholders with embeds.
 - `vault_create_external_reference_note` is for NAS, cloud drive, ticket, PDF, Word, Excel, zip, or log bundle references that should not be stored in the vault.
 - `search_simple` returns all matches per file with filename/content source and context.
+- `search_query` searches Markdown files with path glob, tag, frontmatter equality, and content substring filters.
 - `tag_list` scans frontmatter tags and inline tags, including parent counts for nested tags.
 
 ## Image Integrity
@@ -103,9 +112,9 @@ MCP_TOKEN=change-me VAULT_ROOT=/tmp/vault npm start
 | `IMAGE_ASSET_INTEGRITY_MODE` | `required_for_preserve_original` | Image integrity policy: `optional`, `required_for_preserve_original`, or `required`. |
 | `ENABLE_AUDIT_LOG` | `true` | Log mutating operations as JSON. |
 | `AUDIT_LOG_PATH` | empty | Optional JSONL audit log file path. Defaults to stdout when empty. |
-| `TRASH_DELETE` | `true` | Move deleted notes into the trash directory instead of permanent deletion. |
+| `TRASH_DELETE` | `true` | Move deleted vault files into the trash directory instead of permanent deletion. |
 | `TRASH_DIR` | `.trash` | Vault recovery directory for deleted notes. |
-| `BACKUP_BEFORE_WRITE` | `true` | Copy existing notes before write, append, patch, move, and delete operations. |
+| `BACKUP_BEFORE_WRITE` | `true` | Copy existing vault files before write, append, patch, move, and delete operations. |
 | `BACKUP_DIR` | `.backups` | Vault recovery directory for backups. |
 
 ## Safety Model

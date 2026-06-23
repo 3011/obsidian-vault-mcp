@@ -8,9 +8,21 @@ const root = await mkdtemp(path.join(os.tmpdir(), "obsidian-vault-mcp-"));
 const vault = path.join(root, "vault");
 const outside = path.join(root, "outside.md");
 await mkdir(path.join(vault, "98-Inbox"), { recursive: true });
+await mkdir(path.join(vault, "98-Inbox", "assets"), { recursive: true });
+await mkdir(path.join(vault, "98-Inbox", "empty-dir"), { recursive: true });
+await mkdir(path.join(vault, "98-Inbox", "non-empty-dir"), { recursive: true });
 await mkdir(path.join(vault, "Projects"), { recursive: true });
+await mkdir(path.join(vault, "Projects", "assets"), { recursive: true });
 await writeFile(outside, "outside secret", "utf8");
 await symlink(outside, path.join(vault, "98-Inbox", "link.md"));
+await writeFile(path.join(vault, "98-Inbox", "assets", "pixel.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00]));
+await writeFile(path.join(vault, "98-Inbox", "assets", "orphan.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x01]));
+await writeFile(path.join(vault, "98-Inbox", "assets", "my image.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x02]));
+await writeFile(path.join(vault, "98-Inbox", "assets", "截图 2026.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x03]));
+await writeFile(path.join(vault, "98-Inbox", "assets", "a.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x04]));
+await writeFile(path.join(vault, "Projects", "assets", "a.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x05]));
+await writeFile(path.join(vault, "98-Inbox", "plain.txt"), "plain text\n", "utf8");
+await writeFile(path.join(vault, "98-Inbox", "non-empty-dir", "child.txt"), "child\n", "utf8");
 await writeFile(path.join(vault, "98-Inbox", "fixture.md"), `---
 title: Fixture
 tags:
@@ -39,6 +51,21 @@ needle two
 
 last section
 `, "utf8");
+await writeFile(path.join(vault, "Projects", "asset-refs.md"), `# Asset Refs
+
+![[98-Inbox/assets/pixel.png]]
+![[my image.png|Image Alias]]
+![[截图 2026.png#preview|中文 Alias]]
+![encoded](../98-Inbox/assets/my%20image.png "title")
+<img src="../98-Inbox/assets/截图%202026.png">
+![[a.png]]
+
+\`\`\`md
+![[orphan.png]]
+\`\`\`
+
+This plain text mentions orphan.png but is not a reference.
+`, "utf8");
 
 const port = 18181 + Math.floor(Math.random() * 1000);
 const projectRoot = path.resolve(import.meta.dirname, "../..");
@@ -64,6 +91,7 @@ try {
   await testVaultList(port);
   await testVaultRead(port);
   await testDocumentMap(port);
+  await testAssetAuditTools(port);
   await testWriteAppendMoveDelete(port);
   await testPatch(port);
   await testSearchAndTags(port);
@@ -176,6 +204,7 @@ async function testToolDiscovery(port: number): Promise<void> {
   const names = tools.result.tools.map((tool: any) => tool.name);
   for (const expected of [
     "vault_list",
+    "vault_list_detailed",
     "vault_read",
     "vault_write",
     "vault_append",
@@ -184,6 +213,9 @@ async function testToolDiscovery(port: number): Promise<void> {
     "vault_move",
     "vault_get_document_map",
     "search_simple",
+    "search_query",
+    "find_asset_references",
+    "asset_audit",
     "tag_list",
     "append_to_inbox",
     "vault_upload_image_asset",
@@ -209,6 +241,92 @@ async function testVaultList(port: number): Promise<void> {
   assert(rootList.files.includes("Projects/"));
   const inbox = await callTool(port, "vault_list", { path: "98-Inbox" });
   assert(inbox.files.includes("fixture.md"));
+  assert(inbox.files.includes("assets/"));
+  assert(inbox.files.includes("plain.txt"));
+  const assets = await callTool(port, "vault_list", { path: "98-Inbox/assets" });
+  assert(assets.files.includes("pixel.png"));
+}
+
+async function testAssetAuditTools(port: number): Promise<void> {
+  const detailed = await callTool(port, "vault_list_detailed", { path: "98-Inbox/assets", recursive: false, includeSha256: true });
+  assert.equal(detailed.exists, true);
+  assert.equal(detailed.kind, "directory");
+  assert.equal(detailed.isEmpty, false);
+  assert(detailed.entryCount >= 5);
+  const pixelEntry = detailed.entries.find((entry: any) => entry.path === "98-Inbox/assets/pixel.png");
+  assert(pixelEntry);
+  assert.equal(pixelEntry.mime, "image/png");
+  assert.equal(pixelEntry.isAttachment, true);
+  assert.equal(typeof pixelEntry.sha256, "string");
+
+  const empty = await callTool(port, "vault_list_detailed", { path: "98-Inbox/empty-dir" });
+  assert.equal(empty.exists, true);
+  assert.equal(empty.kind, "directory");
+  assert.equal(empty.isEmpty, true);
+  assert.deepEqual(empty.entries, []);
+
+  const missing = await callTool(port, "vault_list_detailed", { path: "98-Inbox/missing-assets" });
+  assert.equal(missing.exists, false);
+  assert.equal(missing.kind, "missing");
+
+  const denied = await callTool(port, "vault_list_detailed", { path: ".obsidian" });
+  assert.equal(denied.kind, "denied");
+
+  const refs = await callTool(port, "find_asset_references", {
+    assetPaths: [
+      "98-Inbox/assets/pixel.png",
+      "98-Inbox/assets/orphan.png",
+      "98-Inbox/assets/my image.png",
+      "98-Inbox/assets/截图 2026.png",
+      "98-Inbox/assets/a.png",
+      "Projects/assets/a.png",
+      "98-Inbox/assets/missing.png"
+    ]
+  });
+  assert.equal(refs.scanCompleteness, "full_vault");
+  const pixel = refs.results.find((item: any) => item.assetPath === "98-Inbox/assets/pixel.png");
+  assert.equal(pixel.trashSafety, "unsafe");
+  assert.equal(pixel.references[0].resolution, "exact_path");
+
+  const orphan = refs.results.find((item: any) => item.assetPath === "98-Inbox/assets/orphan.png");
+  assert.equal(orphan.candidateOrphan, true);
+  assert.equal(orphan.trashSafety, "safe");
+  assert.equal(orphan.referencedByCount, 0);
+
+  const spaced = refs.results.find((item: any) => item.assetPath === "98-Inbox/assets/my image.png");
+  assert.equal(spaced.trashSafety, "unsafe");
+  assert(spaced.references.some((reference: any) => reference.referenceType === "wikilink_embed"));
+  assert(spaced.references.some((reference: any) => reference.referenceType === "markdown_image"));
+
+  const chinese = refs.results.find((item: any) => item.assetPath === "98-Inbox/assets/截图 2026.png");
+  assert.equal(chinese.trashSafety, "unsafe");
+  assert(chinese.references.some((reference: any) => reference.referenceType === "html_img"));
+
+  const ambiguousInbox = refs.results.find((item: any) => item.assetPath === "98-Inbox/assets/a.png");
+  const ambiguousProject = refs.results.find((item: any) => item.assetPath === "Projects/assets/a.png");
+  assert.equal(ambiguousInbox.ambiguous, true);
+  assert.equal(ambiguousInbox.trashSafety, "unknown");
+  assert.equal(ambiguousProject.ambiguous, true);
+  assert.equal(ambiguousProject.trashSafety, "unknown");
+
+  const missingAsset = refs.results.find((item: any) => item.assetPath === "98-Inbox/assets/missing.png");
+  assert.equal(missingAsset.exists, false);
+  assert.equal(missingAsset.trashSafety, "unknown");
+
+  const scoped = await callTool(port, "find_asset_references", { assetPaths: ["98-Inbox/assets/orphan.png"], scope: "Projects" });
+  assert.equal(scoped.scanCompleteness, "scoped");
+  assert.equal(scoped.results[0].candidateOrphan, true);
+  assert.equal(scoped.results[0].trashSafety, "unknown");
+
+  const audit = await callTool(port, "asset_audit", { root: "98-Inbox/assets", recursive: true });
+  assert.equal(audit.scanCompleteness, "full_vault");
+  assert(audit.summary.totalAssets >= 5);
+  assert(audit.summary.safeToTrash >= 1);
+  assert(audit.summary.unknown >= 1);
+  const auditedOrphan = audit.assets.find((item: any) => item.path === "98-Inbox/assets/orphan.png");
+  assert.equal(auditedOrphan.trashSafety, "safe");
+  const auditedAmbiguous = audit.assets.find((item: any) => item.path === "98-Inbox/assets/a.png");
+  assert.equal(auditedAmbiguous.trashSafety, "unknown");
 }
 
 async function testVaultRead(port: number): Promise<void> {
@@ -235,6 +353,11 @@ async function testVaultRead(port: number): Promise<void> {
   assert.equal(frontmatter, 42);
 
   await expectToolError(port, "vault_read", { path: "98-Inbox/missing.md" }, /no such file|ENOENT/i);
+
+  const plain = await callTool(port, "vault_read", { path: "98-Inbox/plain.txt" });
+  assert.equal(plain.path, "98-Inbox/plain.txt");
+  assert.match(plain.content, /plain text/);
+  await expectToolError(port, "vault_read", { path: "98-Inbox/assets/pixel.png" }, /binary files cannot be read/i);
 }
 
 async function testDocumentMap(port: number): Promise<void> {
@@ -262,6 +385,17 @@ async function testWriteAppendMoveDelete(port: number): Promise<void> {
 
   await callTool(port, "vault_delete", { path: "Projects/existing.md" });
   await expectToolError(port, "vault_read", { path: "Projects/existing.md" }, /no such file|ENOENT/i);
+
+  await callTool(port, "vault_move", { path: "98-Inbox/assets/pixel.png", destination: "Projects/assets/" });
+  const movedAsset = await readFile(path.join(vault, "Projects", "assets", "pixel.png"));
+  assert.equal(movedAsset[1], 0x50);
+  await callTool(port, "vault_delete", { path: "Projects/assets/pixel.png" });
+  await expectToolError(port, "vault_read", { path: "Projects/assets/pixel.png" }, /no such file|ENOENT/i);
+
+  await expectToolError(port, "vault_delete", { path: "98-Inbox/non-empty-dir" }, /not empty|ENOTEMPTY|EEXIST/i);
+  await callTool(port, "vault_delete", { path: "98-Inbox/empty-dir" });
+  await expectToolError(port, "vault_list", { path: "98-Inbox/empty-dir" }, /directory not found/i);
+  await expectToolError(port, "vault_move", { path: "98-Inbox/fixture.md", destination: "98-Inbox/fixture.txt" }, /Markdown and non-Markdown/i);
 }
 
 async function testPatch(port: number): Promise<void> {
@@ -373,6 +507,15 @@ async function testSearchAndTags(port: number): Promise<void> {
   const filenameSearch = await callTool(port, "search_simple", { query: "fixture" });
   assert(filenameSearch.some((item: any) => item.matches.some((match: any) => match.match.source === "filename")));
 
+  const querySearch = await callTool(port, "search_query", {
+    pathGlob: "98-Inbox/**",
+    tag: "project/active",
+    frontmatter: { priority: 42 },
+    content: "needle"
+  });
+  assert(querySearch.some((item: any) => item.filename === "98-Inbox/fixture.md"));
+  assert(querySearch.every((item: any) => item.filename.endsWith(".md")));
+
   const tags = await callTool(port, "tag_list", {});
   assert(tags.tags.some((tag: any) => tag.name === "integration"));
   assert(tags.tags.some((tag: any) => tag.name === "project"));
@@ -405,7 +548,11 @@ async function testReadOnlyMode(): Promise<void> {
     const tools = await rpc(readOnlyPort, { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} });
     const names = tools.result.tools.map((tool: any) => tool.name);
     assert(names.includes("vault_read"));
+    assert(names.includes("vault_list_detailed"));
     assert(names.includes("search_simple"));
+    assert(names.includes("search_query"));
+    assert(names.includes("find_asset_references"));
+    assert(names.includes("asset_audit"));
     assert(!names.includes("vault_write"));
     assert(!names.includes("vault_delete"));
     assert(!names.includes("vault_upload_image_asset"));

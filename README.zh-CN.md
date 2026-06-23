@@ -14,15 +14,19 @@ livesync-cli daemon -> /data/vault -> obsidian-vault-mcp -> ChatGPT Connector
 
 ## 工具列表
 
-- `vault_list`：列出 Markdown 文件和目录。
-- `vault_read`：读取完整笔记元数据/内容，或读取 heading、block、frontmatter 目标。
+- `vault_list`：列出 vault 文件和目录。
+- `vault_list_detailed`：返回结构化路径事实、文件元数据、附件标记、warnings 和 scan ID。
+- `vault_read`：读取完整笔记元数据/内容，或读取 heading、block、frontmatter 目标；也可读取支持的文本文件。
 - `vault_write`：创建或覆盖 Markdown 文件。
 - `vault_append`：追加 Markdown 内容，文件不存在时自动创建。
 - `vault_patch`：patch heading、block 或 frontmatter 目标。
-- `vault_delete`：删除 Markdown 文件。
-- `vault_move`：移动或重命名 Markdown 文件。
+- `vault_delete`：删除 vault 文件或空目录。
+- `vault_move`：移动或重命名 vault 文件。
 - `vault_get_document_map`：列出 headings、block refs、frontmatter fields、links、embeds 和 tags。
 - `search_simple`：全 vault 简单字符串搜索，返回上下文。
+- `search_query`：按 path glob、tag、frontmatter 等值和内容子串搜索 Markdown。
+- `find_asset_references`：只读分析一个或多个附件路径的 Markdown 引用关系，并返回保守的 `trashSafety`。
+- `asset_audit`：只读目录级附件审计，组合详细列表和引用分析结果。
 - `tag_list`：列出 tags 和计数，包含 nested tag 的父级计数。
 - `append_to_inbox`：追加内容到默认 inbox 目录下的笔记。
 - `vault_upload_image_asset`：上传小型图片资产，并返回 Obsidian embed 链接。
@@ -33,17 +37,22 @@ livesync-cli daemon -> /data/vault -> obsidian-vault-mcp -> ChatGPT Connector
 
 ## 实现说明
 
-- `vault_read` 返回内容、frontmatter、tags、文件 stat、links 和 embeds，也可以读取 heading、nested heading path、block reference 或 frontmatter field。
+- `vault_read` 对 Markdown 文件返回内容、frontmatter、tags、文件 stat、links 和 embeds，也可以读取 heading、nested heading path、block reference 或 frontmatter field。对非 Markdown 文本文件返回 content 和 stat；二进制文件会被拒绝。
+- `vault_list_detailed` 会区分路径不存在、文件、空目录、非空目录、被拒绝路径和被跳过条目。它支持递归，并可选计算 SHA-256。
+- `find_asset_references` 支持 Obsidian wikilink、Markdown image link 和常见 HTML `<img src>` 引用。它会忽略 fenced code block 和 inline code，并返回 `scanCompleteness`、`candidateOrphan`、`trashSafety`、证据和 warnings。
+- `asset_audit` 是只读工具，不会移动、删除或改写文件。它组合 `vault_list_detailed` 和 `find_asset_references`；`candidateOrphan=true` 只表示没有发现支持范围内的结构化引用，而 `trashSafety=safe` 只会在 full-vault 扫描且无引用、无歧义、无 unresolved/unsupported match、无同名重复、无相关 warning 时返回。不确定场景返回 `trashSafety=unknown`。
 - `vault_write` 使用原子写入创建或覆盖 Markdown 文件。
 - `vault_append` 会保留已有内容，文件不存在时创建文件。
 - `vault_patch` 支持 heading、block、frontmatter 目标，操作包括 `replace`、`prepend`、`append`；也支持 `createTargetIfMissing`、`rejectIfContentPreexists`、`trimTargetWhitespace`、`targetDelimiter`、`contentType` 和 `targetScope`。
 - duplicate heading path 当前遵循 `markdown-patch` 的 map 行为：后匹配的 heading 会胜出。使用 `vault_patch` 时建议保持 heading path 唯一，或传入更具体的 nested path。
-- `vault_move` 支持 destination 以 `/` 结尾表示目标目录，并支持可选 overwrite。
+- `vault_delete` 支持删除 vault 文件和空目录，非空目录会被拒绝。
+- `vault_move` 支持 vault 文件移动，destination 以 `/` 结尾表示目标目录，并支持可选 overwrite。它不允许在 Markdown 和非 Markdown 扩展之间互相改名。
 - `vault_upload_image_asset` 只接受 PNG、JPEG、WebP、GIF，会校验 MIME、扩展名、大小、基础 magic bytes，并要求目标目录名为 `assets`。
 - `vault_upload_image_asset` 和 `vault_create_note_with_assets` 支持可选 `expectedSha256`、`expectedSize`、`preserveOriginal` 字段。需要证明原始字节无损保存时建议使用这些字段。
 - `vault_create_note_with_assets` 把图片保存到 note-local `assets/` 目录，并把 `{{asset:n}}` 占位符替换为 Obsidian embed。
 - `vault_create_external_reference_note` 用于 NAS、云盘、工单、PDF、Word、Excel、zip、日志包等不应该进入 vault 的原始材料。
 - `search_simple` 按文件返回所有匹配和上下文。
+- `search_query` 按 path glob、tag、frontmatter 等值和内容子串过滤 Markdown 文件。
 - `tag_list` 扫描 frontmatter tags 和 inline tags，并统计 nested tag 的父级。
 
 ## 图片完整性
@@ -103,9 +112,9 @@ MCP_TOKEN=change-me VAULT_ROOT=/tmp/vault npm start
 | `IMAGE_ASSET_INTEGRITY_MODE` | `required_for_preserve_original` | 图片完整性策略：`optional`、`required_for_preserve_original` 或 `required`。 |
 | `ENABLE_AUDIT_LOG` | `true` | 把 mutating operations 记录为 JSON。 |
 | `AUDIT_LOG_PATH` | empty | 可选 JSONL 审计日志文件路径；为空时输出到 stdout。 |
-| `TRASH_DELETE` | `true` | 删除时移动到 trash 目录，而不是永久删除。 |
+| `TRASH_DELETE` | `true` | 删除时把 vault 文件移动到 trash 目录，而不是永久删除。 |
 | `TRASH_DIR` | `.trash` | 删除恢复目录。 |
-| `BACKUP_BEFORE_WRITE` | `true` | write、append、patch、move、delete 前备份已有笔记。 |
+| `BACKUP_BEFORE_WRITE` | `true` | write、append、patch、move、delete 前备份已有 vault 文件。 |
 | `BACKUP_DIR` | `.backups` | 备份恢复目录。 |
 
 ## 安全模型

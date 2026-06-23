@@ -1,7 +1,8 @@
-import { copyFile, mkdir, readdir, readFile, rename, rm, stat } from "node:fs/promises";
+import { copyFile, mkdir, readdir, readFile, rename, rm, rmdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { atomicWriteFile } from "./atomicWrite.js";
 import { audit } from "./audit.js";
+import { assetAudit, findAssetReferences, vaultListDetailed, type AssetAuditArgs, type FindAssetReferencesArgs, type VaultListDetailedArgs } from "./assetAudit.js";
 import { FileLocks } from "./FileLocks.js";
 import { PathGuard } from "./pathGuard.js";
 import { MutationJournal } from "./mutationJournal.js";
@@ -24,6 +25,14 @@ export type ExternalReference = {
   location: string;
   type?: string;
   note?: string;
+};
+
+export type SearchQueryArgs = {
+  pathGlob?: string;
+  tag?: string;
+  frontmatter?: Record<string, unknown>;
+  content?: string;
+  limit?: number;
 };
 
 export class FsVault {
@@ -76,14 +85,38 @@ export class FsVault {
     });
     return entries
       .filter((entry) => !entry.name.startsWith("."))
-      .filter((entry) => entry.isDirectory() || (entry.isFile() && entry.name.endsWith(".md")))
+      .filter((entry) => entry.isDirectory() || entry.isFile())
       .map((entry) => entry.isDirectory() ? `${entry.name}/` : entry.name)
+      .filter((entry) => {
+        try {
+          if (entry.endsWith("/")) this.guard.validateDirPath(`${relativeDir}/${entry}`.replace(/^\/+/, ""));
+          else this.guard.validateVaultFilePath(`${relativeDir}/${entry}`.replace(/^\/+/, ""));
+          return true;
+        } catch {
+          return false;
+        }
+      })
       .sort();
   }
 
+  async listDetailed(args: VaultListDetailedArgs): Promise<unknown> {
+    return vaultListDetailed(this.guard, args);
+  }
+
   async read(filePath: string, options: { targetType?: string; target?: string; targetDelimiter?: string } = {}): Promise<unknown> {
-    const relative = this.guard.validateFilePath(filePath);
+    const relative = this.guard.validateVaultFilePath(filePath);
     const absolute = await this.guard.resolveExisting(relative);
+    if (!relative.endsWith(".md")) {
+      if (options.targetType || options.target) throw new Error("targeted reads are only supported for Markdown .md files");
+      if (!isTextReadablePath(relative)) throw new Error("binary files cannot be read with vault_read");
+      const content = await readFile(absolute, "utf8");
+      const fileStat = await stat(absolute);
+      return {
+        path: relative,
+        content,
+        stat: { ctime: fileStat.ctimeMs, mtime: fileStat.mtimeMs, size: fileStat.size }
+      };
+    }
     const content = await readFile(absolute, "utf8");
     if ((options.targetType == null) !== (options.target == null)) throw new Error("targetType and target must be provided together");
     if (options.targetType && options.target) return this.readTarget(content, options.targetType, options.target, options.targetDelimiter);
@@ -219,10 +252,16 @@ export class FsVault {
   }
 
   async delete(filePath: string): Promise<void> {
-    const relative = this.guard.validateFilePath(filePath);
+    const relative = this.guard.validateVaultPath(filePath);
     await this.locks.withLock([relative], async () => {
       try {
-        const absolute = await this.guard.resolveExisting(relative);
+        const existing = await this.guard.resolveExistingPath(relative);
+        if (existing.type === "directory") {
+          await rmdir(existing.absolute);
+          await audit("vault_delete", "success", { path: relative, directory: true });
+          return;
+        }
+        const absolute = existing.absolute;
         await this.backupExisting(relative, "vault_delete");
         if (this.trashDelete) {
           const trashRelative = await this.allocateRecoveryPath(this.trashDir, relative, "vault_delete");
@@ -246,8 +285,12 @@ export class FsVault {
   }
 
   async move(filePath: string, destination: string, allowOverwrite = false): Promise<string> {
-    const sourceRelative = this.guard.validateFilePath(filePath);
-    const destinationRelative = this.guard.validateDestination(destination, sourceRelative);
+    const sourceRelative = this.guard.validateVaultFilePath(filePath);
+    const destinationRelative = this.guard.validateVaultDestination(destination, sourceRelative);
+    const sourceIsMarkdown = sourceRelative.endsWith(".md");
+    if (sourceIsMarkdown !== destinationRelative.endsWith(".md")) {
+      throw new Error("vault_move cannot change a file between Markdown and non-Markdown extensions");
+    }
     return this.locks.withLock([sourceRelative, destinationRelative], async () => {
       try {
         const sourceAbsolute = await this.guard.resolveExisting(sourceRelative);
@@ -319,6 +362,51 @@ export class FsVault {
     }
     results.sort((a: any, b: any) => (b.score ?? 0) - (a.score ?? 0));
     return results;
+  }
+
+  async searchQuery(args: SearchQueryArgs): Promise<unknown[]> {
+    const boundedLimit = Math.max(1, Math.min(Number.isFinite(args.limit) ? Number(args.limit) : 100, 500));
+    const pathRegexp = args.pathGlob?.trim() ? globToRegExp(args.pathGlob.trim()) : undefined;
+    const tag = args.tag?.replace(/^#/, "");
+    const contentNeedle = args.content?.toLowerCase();
+    const frontmatter = args.frontmatter && typeof args.frontmatter === "object" && !Array.isArray(args.frontmatter) ? args.frontmatter : undefined;
+    const results: unknown[] = [];
+    for await (const relative of this.walkMarkdown()) {
+      if (pathRegexp && !pathRegexp.test(relative)) continue;
+      const absolute = this.guard.resolveCreate(relative);
+      const content = await readFile(absolute, "utf8");
+      if (contentNeedle && !content.toLowerCase().includes(contentNeedle)) continue;
+      const parsedFrontmatter = parseFrontmatter(content).data;
+      const map = getDocumentMap(content);
+      const tags = [...new Set([...frontmatterTags(parsedFrontmatter), ...map.tags])].sort();
+      if (tag && !tags.map((item) => item.replace(/^#/, "")).includes(tag)) continue;
+      if (frontmatter && !frontmatterMatches(parsedFrontmatter, frontmatter)) continue;
+      const fileStat = await stat(absolute);
+      results.push({
+        filename: relative,
+        frontmatter: parsedFrontmatter,
+        tags,
+        stat: { ctime: fileStat.ctimeMs, mtime: fileStat.mtimeMs, size: fileStat.size },
+        links: map.links,
+        embeds: map.embeds
+      });
+      if (results.length >= boundedLimit) break;
+    }
+    return results;
+  }
+
+  async findAssetReferences(args: FindAssetReferencesArgs): Promise<unknown> {
+    const input: FindAssetReferencesArgs = { assetPaths: args.assetPaths };
+    if (args.scope != null) input.scope = this.guard.validateDirPath(args.scope);
+    return findAssetReferences(this.guard, input);
+  }
+
+  async assetAudit(args: AssetAuditArgs): Promise<unknown> {
+    const input: AssetAuditArgs = { root: this.guard.validateDirPath(args.root) };
+    if (args.recursive != null) input.recursive = args.recursive;
+    if (args.includeSha256 != null) input.includeSha256 = args.includeSha256;
+    if (args.scope != null) input.scope = this.guard.validateDirPath(args.scope);
+    return assetAudit(this.guard, input);
   }
 
   async tagList(): Promise<Array<{ name: string; count: number }>> {
@@ -524,6 +612,22 @@ function expandTag(tag: string): string[] {
   const names: string[] = [];
   for (let index = 1; index <= parts.length; index += 1) names.push(parts.slice(0, index).join("/"));
   return names.filter(Boolean);
+}
+
+function isTextReadablePath(relative: string): boolean {
+  return new Set([".txt", ".json", ".yaml", ".yml", ".csv", ".log", ".xml", ".html", ".css", ".js", ".ts"]).has(path.posix.extname(relative).toLowerCase());
+}
+
+function frontmatterMatches(actual: Record<string, unknown>, expected: Record<string, unknown>): boolean {
+  return Object.entries(expected).every(([key, value]) => JSON.stringify(actual[key]) === JSON.stringify(value));
+}
+
+function globToRegExp(pattern: string): RegExp {
+  const escaped = pattern.split(/(\*\*)/g).map((part) => {
+    if (part === "**") return ".*";
+    return part.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[^/]*").replace(/\?/g, "[^/]");
+  }).join("");
+  return new RegExp(`^${escaped}$`);
 }
 
 function errorMessage(error: unknown): string {
