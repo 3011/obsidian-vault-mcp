@@ -1,9 +1,8 @@
-import { mkdir, open, rename, rm } from "node:fs/promises";
+import { open, rename, rm } from "node:fs/promises";
 import path from "node:path";
 
 export async function atomicWriteFile(targetPath: string, content: string | Uint8Array): Promise<void> {
   const dir = path.dirname(targetPath);
-  await mkdir(dir, { recursive: true });
   const tempPath = path.join(dir, `.${path.basename(targetPath)}.${process.pid}.${Date.now()}.tmp`);
   const file = await open(tempPath, "w", 0o600);
   try {

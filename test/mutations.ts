@@ -6,6 +6,8 @@ import { callTool, createVaultServer } from "./helpers.js";
 import { FsVault } from "../src/vault/FsVault.js";
 import { MutationJournal } from "../src/vault/mutationJournal.js";
 
+await assertDefaultDirectoryValidation();
+
 class FailingMutationJournal extends MutationJournal {
   override async createDelete(): Promise<any> {
     throw new Error("forced mutation failure");
@@ -24,6 +26,7 @@ await server.close();
 const root = await mkdtemp(path.join(os.tmpdir(), "obsidian-vault-mcp-mutations-"));
 const vault = path.join(root, "vault");
 const mutations = path.join(root, "mutations");
+await mkdir(path.join(vault, "98-Inbox", "assets"), { recursive: true });
 const walServer = await createVaultServer({
   VAULT_ROOT: vault,
   MUTATION_QUEUE_DIR: mutations,
@@ -67,6 +70,28 @@ try {
 } finally {
   await walServer.close();
   await rm(root, { recursive: true, force: true });
+}
+
+async function assertDefaultDirectoryValidation(): Promise<void> {
+  const parent = await mkdtemp(path.join(os.tmpdir(), "obsidian-vault-mcp-default-dir-"));
+  try {
+    const missingInbox = new FsVault(path.join(parent, "missing-inbox"), "98-Inbox", {
+      validateDefaultWriteDir: true,
+      backupBeforeWrite: false
+    });
+    await assert.rejects(() => missingInbox.init(), /default write directory not found: 98-Inbox/i);
+
+    const missingAssetsRoot = path.join(parent, "missing-assets");
+    await mkdir(path.join(missingAssetsRoot, "98-Inbox"), { recursive: true });
+    const missingAssets = new FsVault(missingAssetsRoot, "98-Inbox", {
+      validateDefaultWriteDir: true,
+      validateDefaultAssetDir: true,
+      backupBeforeWrite: false
+    });
+    await assert.rejects(() => missingAssets.init(), /default asset directory not found: 98-Inbox\/assets/i);
+  } finally {
+    await rm(parent, { recursive: true, force: true });
+  }
 }
 
 async function assertWalFailureDoesNotDelete(parent: string): Promise<void> {

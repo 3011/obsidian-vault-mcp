@@ -2,7 +2,7 @@ import { config } from "../config.js";
 import { FsVault } from "../vault/FsVault.js";
 import type { Tool } from "./types.js";
 
-const mdPath = { type: "string", description: "Vault-relative Markdown note path ending in .md. Absolute paths and traversal are rejected." };
+const mdPath = { type: "string", description: "Vault-relative Markdown note path ending in .md. The parent directory must already exist; writes to the vault root, absolute paths, traversal, and unapproved write roots are rejected." };
 const vaultPath = { type: "string", description: "Vault-relative file path. Absolute paths and traversal are rejected." };
 
 export function buildTools(vault: FsVault): Tool[] {
@@ -65,7 +65,7 @@ export function buildTools(vault: FsVault): Tool[] {
     {
       name: "vault_write",
       title: "Vault Write",
-      description: "Create or overwrite a Markdown note. This tool is Markdown-only and does not write binary attachments.",
+      description: "Create or overwrite a Markdown note inside an existing approved directory. This tool never creates directories. Inspect the vault with vault_list first; when classification is uncertain, use append_to_inbox.",
       inputSchema: {
         type: "object",
         properties: { path: mdPath, content: { type: "string", description: "Full Markdown content." } },
@@ -80,7 +80,7 @@ export function buildTools(vault: FsVault): Tool[] {
     {
       name: "vault_append",
       title: "Vault Append",
-      description: "Append Markdown content to a note, creating the Markdown note if missing.",
+      description: "Append Markdown content to a note, creating the Markdown file if missing. Its parent directory must already exist; this tool never creates directories. Use append_to_inbox when classification is uncertain.",
       inputSchema: {
         type: "object",
         properties: { path: mdPath, content: { type: "string", description: "Markdown content to append." } },
@@ -162,7 +162,7 @@ export function buildTools(vault: FsVault): Tool[] {
     {
       name: "vault_move",
       title: "Vault Move",
-      description: "Move or rename a vault file, including attachments. If destination ends with '/', the original filename is preserved. Markdown files cannot be renamed to non-Markdown paths, or vice versa.",
+      description: "Move or rename a vault file into an existing approved destination directory. This tool never creates directories. If destination ends with '/', the original filename is preserved. Markdown files cannot be renamed to non-Markdown paths, or vice versa.",
       inputSchema: {
         type: "object",
         properties: {
@@ -288,7 +288,7 @@ export function buildTools(vault: FsVault): Tool[] {
     {
       name: "append_to_inbox",
       title: "Append To Inbox",
-      description: "Append Markdown content to a note under the configured default inbox directory.",
+      description: "Append Markdown content to a note under the configured default inbox directory. Use this when no existing planned directory clearly matches; the inbox directory must already exist.",
       inputSchema: {
         type: "object",
         properties: {
@@ -306,7 +306,7 @@ export function buildTools(vault: FsVault): Tool[] {
     {
       name: "vault_upload_image_asset",
       title: "Vault Upload Image Asset",
-      description: "Upload a small image asset into an allowed vault assets directory and return an Obsidian embed link. Only image MIME types are accepted.",
+      description: "Upload a small image asset into an existing approved vault assets directory and return an Obsidian embed link. This tool never creates asset directories. Only image MIME types are accepted.",
       inputSchema: {
         type: "object",
         properties: {
@@ -337,7 +337,7 @@ export function buildTools(vault: FsVault): Tool[] {
     {
       name: "vault_create_note_with_assets",
       title: "Vault Create Note With Assets",
-      description: "Create a Markdown note and store small image assets beside it, replacing {{asset:n}} placeholders with Obsidian embeds.",
+      description: "Create a Markdown note and store small image assets in the existing adjacent assets directory, replacing {{asset:n}} placeholders with Obsidian embeds. Neither the note parent nor asset directory is created implicitly.",
       inputSchema: {
         type: "object",
         properties: {
@@ -369,7 +369,7 @@ export function buildTools(vault: FsVault): Tool[] {
     {
       name: "vault_create_external_reference_note",
       title: "Vault Create External Reference Note",
-      description: "Create a structured Markdown note that references external source files without uploading those files into the vault.",
+      description: "Create a structured Markdown note inside an existing approved directory that references external source files without uploading those files into the vault. This tool never creates directories.",
       inputSchema: {
         type: "object",
         properties: {

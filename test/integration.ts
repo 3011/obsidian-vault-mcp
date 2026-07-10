@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import assert from "node:assert/strict";
@@ -11,8 +11,10 @@ await mkdir(path.join(vault, "98-Inbox"), { recursive: true });
 await mkdir(path.join(vault, "98-Inbox", "assets"), { recursive: true });
 await mkdir(path.join(vault, "98-Inbox", "empty-dir"), { recursive: true });
 await mkdir(path.join(vault, "98-Inbox", "non-empty-dir"), { recursive: true });
-await mkdir(path.join(vault, "Projects"), { recursive: true });
+await mkdir(path.join(vault, "Projects", "Nested"), { recursive: true });
 await mkdir(path.join(vault, "Projects", "assets"), { recursive: true });
+await mkdir(path.join(vault, "Projects", "NoAssets"), { recursive: true });
+await mkdir(path.join(vault, "Other"), { recursive: true });
 await writeFile(outside, "outside secret", "utf8");
 await symlink(outside, path.join(vault, "98-Inbox", "link.md"));
 await writeFile(path.join(vault, "98-Inbox", "assets", "pixel.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00]));
@@ -71,7 +73,15 @@ const port = 18181 + Math.floor(Math.random() * 1000);
 const projectRoot = path.resolve(import.meta.dirname, "../..");
 const child = spawn(process.execPath, ["dist/src/server.js"], {
   cwd: projectRoot,
-  env: { ...process.env, MCP_HOST: "127.0.0.1", MCP_PORT: String(port), MCP_TOKEN: "test-token", VAULT_ROOT: vault, MAX_REQUEST_BYTES: "4096" },
+  env: {
+    ...process.env,
+    MCP_HOST: "127.0.0.1",
+    MCP_PORT: String(port),
+    MCP_TOKEN: "test-token",
+    VAULT_ROOT: vault,
+    WRITE_ALLOWED_ROOTS: "98-Inbox,Projects",
+    MAX_REQUEST_BYTES: "4096"
+  },
   stdio: ["ignore", "pipe", "pipe"]
 });
 
@@ -93,6 +103,7 @@ try {
   await testDocumentMap(port);
   await testAssetAuditTools(port);
   await testWriteAppendMoveDelete(port);
+  await testDirectoryPolicy(port);
   await testPatch(port);
   await testSearchAndTags(port);
   await testAppendToInbox(port);
@@ -396,6 +407,66 @@ async function testWriteAppendMoveDelete(port: number): Promise<void> {
   await callTool(port, "vault_delete", { path: "98-Inbox/empty-dir" });
   await expectToolError(port, "vault_list", { path: "98-Inbox/empty-dir" }, /directory not found/i);
   await expectToolError(port, "vault_move", { path: "98-Inbox/fixture.md", destination: "98-Inbox/fixture.txt" }, /Markdown and non-Markdown/i);
+}
+
+async function testDirectoryPolicy(port: number): Promise<void> {
+  await expectToolError(port, "vault_write", {
+    path: "Projects/Unplanned/note.md",
+    content: "must not create parent\n"
+  }, /parent directory not found: Projects\/Unplanned.*never creates directories implicitly/i);
+  await assert.rejects(() => stat(path.join(vault, "Projects", "Unplanned")), /ENOENT/);
+
+  await expectToolError(port, "vault_append", {
+    path: "Projects/Another-Unplanned/note.md",
+    content: "must not create parent\n"
+  }, /parent directory not found/i);
+  await assert.rejects(() => stat(path.join(vault, "Projects", "Another-Unplanned")), /ENOENT/);
+
+  await expectToolError(port, "vault_write", {
+    path: "root-note.md",
+    content: "root write\n"
+  }, /writes to the vault root are not allowed/i);
+  await assert.rejects(() => stat(path.join(vault, "root-note.md")), /ENOENT/);
+
+  await expectToolError(port, "vault_write", {
+    path: "Other/blocked.md",
+    content: "blocked root\n"
+  }, /write root is not allowed: Other/i);
+  await assert.rejects(() => stat(path.join(vault, "Other", "blocked.md")), /ENOENT/);
+
+  await callTool(port, "vault_write", {
+    path: "Projects/move-policy-source.md",
+    content: "move policy\n"
+  });
+  await expectToolError(port, "vault_move", {
+    path: "Projects/move-policy-source.md",
+    destination: "Projects/Missing-Destination/"
+  }, /parent directory not found/i);
+  assert.match(await readFile(path.join(vault, "Projects", "move-policy-source.md"), "utf8"), /move policy/);
+  await assert.rejects(() => stat(path.join(vault, "Projects", "Missing-Destination")), /ENOENT/);
+
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).toString("base64");
+  await expectToolError(port, "vault_upload_image_asset", {
+    filename: "missing-dir.png",
+    mimeType: "image/png",
+    contentBase64: png,
+    dir: "Projects/Missing/assets"
+  }, /asset directory not found/i);
+  await assert.rejects(() => stat(path.join(vault, "Projects", "Missing")), /ENOENT/);
+
+  await expectToolError(port, "vault_create_note_with_assets", {
+    path: "Projects/NoAssets/note.md",
+    content: "{{asset:0}}",
+    assets: [{ filename: "image.png", mimeType: "image/png", contentBase64: png }]
+  }, /asset directory not found: Projects\/NoAssets\/assets/i);
+  await assert.rejects(() => stat(path.join(vault, "Projects", "NoAssets", "note.md")), /ENOENT/);
+
+  await expectToolError(port, "vault_create_external_reference_note", {
+    path: "Projects/Missing-References/reference.md",
+    title: "Reference",
+    references: [{ label: "source", location: "external://source" }]
+  }, /parent directory not found/i);
+  await assert.rejects(() => stat(path.join(vault, "Projects", "Missing-References")), /ENOENT/);
 }
 
 async function testPatch(port: number): Promise<void> {

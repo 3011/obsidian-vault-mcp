@@ -48,6 +48,7 @@ export type Config = {
   serverVersion: string;
   vaultRoot: string;
   defaultWriteDir: string;
+  writeAllowedRoots: string[];
   requireToken: boolean;
   token: string;
   allowedOrigins: string[];
@@ -89,6 +90,7 @@ export const config: Config = {
   serverVersion: process.env.MCP_SERVER_VERSION || "0.1.0",
   vaultRoot,
   defaultWriteDir: (process.env.DEFAULT_WRITE_DIR || "98-Inbox").replace(/^\/+|\/+$/g, ""),
+  writeAllowedRoots: listEnv("WRITE_ALLOWED_ROOTS", []),
   requireToken: boolEnv("MCP_REQUIRE_TOKEN", true),
   token: tokenFromEnv(),
   allowedOrigins: (process.env.MCP_ALLOWED_ORIGINS || "")

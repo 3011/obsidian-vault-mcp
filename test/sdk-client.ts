@@ -8,7 +8,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 
 const root = await mkdtemp(path.join(os.tmpdir(), "obsidian-vault-mcp-sdk-"));
 const vault = path.join(root, "vault");
-await mkdir(path.join(vault, "98-Inbox"), { recursive: true });
+await mkdir(path.join(vault, "98-Inbox", "assets"), { recursive: true });
 await writeFile(path.join(vault, "98-Inbox", "sdk.md"), "# SDK\n\nhello sdk\n", "utf8");
 
 const port = 19191 + Math.floor(Math.random() * 1000);

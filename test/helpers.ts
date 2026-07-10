@@ -15,7 +15,7 @@ export type TestServer = {
 export async function createVaultServer(env: Record<string, string> = {}): Promise<TestServer> {
   const root = await mkdtemp(path.join(os.tmpdir(), "obsidian-vault-mcp-test-"));
   const vault = path.join(root, "vault");
-  await mkdir(path.join(vault, "98-Inbox"), { recursive: true });
+  await mkdir(path.join(vault, "98-Inbox", "assets"), { recursive: true });
   const port = 20000 + Math.floor(Math.random() * 20000);
   const projectRoot = path.resolve(import.meta.dirname, "../..");
   const child = spawn(process.execPath, ["dist/src/server.js"], {

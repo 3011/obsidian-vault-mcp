@@ -77,9 +77,12 @@ With the default `IMAGE_ASSET_INTEGRITY_MODE=required_for_preserve_original`, `p
 ## Run
 
 ```bash
+mkdir -p /tmp/vault/98-Inbox/assets
 npm run build
 MCP_TOKEN=change-me VAULT_ROOT=/tmp/vault npm start
 ```
+
+The configured inbox and default asset directory must already exist. Note-writing tools never create parent directories implicitly.
 
 ## Configuration
 
@@ -95,7 +98,8 @@ MCP_TOKEN=change-me VAULT_ROOT=/tmp/vault npm start
 | `MCP_ALLOWED_ORIGINS` | empty | Comma-separated CORS allowlist; `*` allows all. |
 | `VAULT_ROOT` | `/data/vault` | Markdown vault root. |
 | `MUTATION_QUEUE_DIR` | empty | Optional absolute WAL directory for LiveSync delete/move mutation intents. Must not be inside `VAULT_ROOT`. |
-| `DEFAULT_WRITE_DIR` | `98-Inbox` | Inbox directory for `append_to_inbox`. |
+| `DEFAULT_WRITE_DIR` | `98-Inbox` | Existing inbox directory for `append_to_inbox`. Startup fails when the tool is enabled and this directory is missing. |
+| `WRITE_ALLOWED_ROOTS` | empty | Optional comma-separated allowlist of existing top-level write directories. Empty allows any existing top-level directory; vault-root writes are still rejected. |
 | `MAX_REQUEST_BYTES` | `16777216` | Maximum JSON request body size. Keep this larger than base64-encoded image assets. |
 | `READ_ONLY` | `false` | Hide all mutating tools when true. |
 | `ENABLE_VAULT_WRITE` | `true` | Expose `vault_write`. |
@@ -126,6 +130,10 @@ The server allows destructive tools when enabled, but still enforces baseline fi
 - no symlink escape from the vault root;
 - no access to `.obsidian/`, `.livesync/`, `.git/`, `.trash/`, `.backups`, or `node_modules/`;
 - no temp/swap files;
+- no writes directly in the vault root;
+- no implicit parent-directory creation by note, asset, or move tools;
+- optional top-level write allowlist via `WRITE_ALLOWED_ROOTS`;
+- startup validation for the configured inbox and default asset directory when their tools are enabled;
 - no arbitrary attachment uploads; only small image assets are accepted as vault files;
 - per-file locks for write, append, patch, move, and delete;
 - atomic writes with temp file, fsync, and rename;
@@ -139,7 +147,7 @@ npm run typecheck
 npm test
 ```
 
-The test suite starts the HTTP MCP server and covers all exposed tools, authentication failure, path traversal rejection, sensitive directory rejection, symlink escape rejection, overwrite move behavior, patch variants, image asset validation, external reference note creation, search multi-match behavior, and tag aggregation.
+The test suite starts the HTTP MCP server and covers all exposed tools, authentication failure, path traversal rejection, sensitive directory rejection, symlink escape rejection, missing-parent rejection without directory creation, root-write rejection, write-root allowlists, overwrite move behavior, patch variants, image asset validation, external reference note creation, search multi-match behavior, and tag aggregation.
 
 It also runs an official `@modelcontextprotocol/sdk` Streamable HTTP client compatibility test that connects to `/mcp`, lists tools, and calls `vault_read`, `vault_write`, and `search_simple`.
 

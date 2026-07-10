@@ -1,4 +1,4 @@
-import { readFile, stat } from "node:fs/promises";
+import { mkdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -11,6 +11,7 @@ const gif = b64([0x47, 0x49, 0x46, 0x38, 0x39, 0x61]);
 const pdf = Buffer.from("%PDF-1.7").toString("base64");
 
 const server = await createVaultServer({ MAX_IMAGE_ASSET_BYTES: "32" });
+await mkdir(path.join(server.vault, "Projects", "assets"), { recursive: true });
 
 try {
   await testToolDiscovery();

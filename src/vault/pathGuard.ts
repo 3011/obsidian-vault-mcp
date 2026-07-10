@@ -7,10 +7,19 @@ const FORBIDDEN_SUFFIXES = [".tmp", ".swp", ".swo"];
 export class PathGuard {
   readonly root: string;
   readonly defaultWriteDir: string;
+  readonly writeAllowedRoots: readonly string[];
 
-  constructor(root: string, defaultWriteDir: string) {
+  constructor(root: string, defaultWriteDir: string, writeAllowedRoots: string[] = []) {
     this.root = path.resolve(root);
-    this.defaultWriteDir = defaultWriteDir.replace(/^\/+|\/+$/g, "");
+    this.defaultWriteDir = this.validateDirPath(defaultWriteDir);
+    if (!this.defaultWriteDir) throw new Error("default write directory is required");
+    this.writeAllowedRoots = [...new Set(writeAllowedRoots.map((value) => {
+      const normalized = this.validateDirPath(value);
+      if (!normalized || normalized.includes("/")) {
+        throw new Error(`write allowed root must be a top-level directory: ${value}`);
+      }
+      return normalized;
+    }))];
   }
 
   async ensureRoot(): Promise<void> {
@@ -114,6 +123,35 @@ export class PathGuard {
     return { absolute, type: fileStat.isDirectory() ? "directory" : "file" };
   }
 
+  async assertWritableParent(relativePath: string): Promise<void> {
+    const parent = path.posix.dirname(relativePath);
+    if (parent === "." || parent === "") {
+      throw new Error("writes to the vault root are not allowed; choose an existing directory or use append_to_inbox");
+    }
+    await this.assertWritableDirectory(parent, "parent directory");
+  }
+
+  async assertWritableDirectory(relativeDir: string, label = "directory"): Promise<void> {
+    const normalized = this.validateDirPath(relativeDir);
+    if (!normalized) {
+      throw new Error("the vault root cannot be used as a write directory; choose an existing subdirectory or use append_to_inbox");
+    }
+    this.assertAllowedWriteRoot(normalized);
+    const absolute = this.resolveCreate(normalized);
+    let fileStat: Awaited<ReturnType<typeof lstat>>;
+    try {
+      fileStat = await lstat(absolute);
+    } catch (error: any) {
+      if (error?.code === "ENOENT") {
+        throw new Error(`${label} not found: ${normalized}. This server never creates directories implicitly; choose an existing directory or use append_to_inbox`, { cause: error });
+      }
+      throw error;
+    }
+    if (!fileStat.isDirectory()) throw new Error(`${label} is not a directory: ${normalized}`);
+    const real = await realpath(absolute);
+    this.assertInsideRoot(real);
+  }
+
   relative(absolutePath: string): string {
     return path.relative(this.root, absolutePath).split(path.sep).join("/");
   }
@@ -139,6 +177,13 @@ export class PathGuard {
     if (base === ".DS_Store" || FORBIDDEN_SUFFIXES.some((suffix) => base.endsWith(suffix))) {
       throw new Error("temporary files are not allowed");
     }
+  }
+
+  private assertAllowedWriteRoot(relativePath: string): void {
+    if (this.writeAllowedRoots.length === 0) return;
+    const root = relativePath.split("/", 1)[0];
+    if (root && this.writeAllowedRoots.includes(root)) return;
+    throw new Error(`write root is not allowed: ${root || relativePath}; allowed roots: ${this.writeAllowedRoots.join(", ")}`);
   }
 
   private validateRelativePath(rawPath: unknown, label: "path" | "destination"): string {

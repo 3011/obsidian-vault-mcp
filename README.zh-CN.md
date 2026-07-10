@@ -77,9 +77,12 @@ livesync-cli daemon -> /data/vault -> obsidian-vault-mcp -> ChatGPT Connector
 ## 运行
 
 ```bash
+mkdir -p /tmp/vault/98-Inbox/assets
 npm run build
 MCP_TOKEN=change-me VAULT_ROOT=/tmp/vault npm start
 ```
+
+配置的 Inbox 和默认附件目录必须预先存在。笔记写入工具不会隐式创建父目录。
 
 ## 配置
 
@@ -95,7 +98,8 @@ MCP_TOKEN=change-me VAULT_ROOT=/tmp/vault npm start
 | `MCP_ALLOWED_ORIGINS` | empty | CORS allowlist，逗号分隔；`*` 表示允许全部。 |
 | `VAULT_ROOT` | `/data/vault` | Markdown vault 根目录。 |
 | `MUTATION_QUEUE_DIR` | empty | 可选的 LiveSync delete/move mutation intent WAL 绝对路径，不能位于 `VAULT_ROOT` 内。 |
-| `DEFAULT_WRITE_DIR` | `98-Inbox` | `append_to_inbox` 使用的 inbox 目录。 |
+| `DEFAULT_WRITE_DIR` | `98-Inbox` | `append_to_inbox` 使用的现有 Inbox 目录；工具启用时若目录不存在，服务启动失败。 |
+| `WRITE_ALLOWED_ROOTS` | empty | 可选的一级写入目录白名单，逗号分隔。为空时允许任意已存在的一级目录，但仍禁止直接写 Vault 根目录。 |
 | `MAX_REQUEST_BYTES` | `16777216` | JSON 请求体大小限制，需要大于 base64 图片资产大小。 |
 | `READ_ONLY` | `false` | 为 true 时隐藏所有 mutating tools。 |
 | `ENABLE_VAULT_WRITE` | `true` | 暴露 `vault_write`。 |
@@ -126,6 +130,10 @@ MCP_TOKEN=change-me VAULT_ROOT=/tmp/vault npm start
 - 不允许 symlink 逃出 vault root；
 - 不允许访问 `.obsidian/`、`.livesync/`、`.git/`、`.trash/`、`.backups`、`node_modules/`；
 - 不允许临时/交换文件；
+- 禁止直接写入 Vault 根目录；
+- 笔记、附件和移动工具不会隐式创建父目录；
+- 可通过 `WRITE_ALLOWED_ROOTS` 限制允许写入的一级目录；
+- 相应工具启用时，启动阶段会校验 Inbox 和默认附件目录已经存在；
 - 不支持任意附件上传，只允许小型图片资产作为 vault 文件；
 - write、append、patch、move、delete 使用 per-file lock；
 - 原子写入使用临时文件、fsync 和 rename；
@@ -139,7 +147,7 @@ npm run typecheck
 npm test
 ```
 
-测试套件会启动 HTTP MCP Server，并覆盖所有暴露工具、认证失败、路径穿越拒绝、敏感目录拒绝、symlink escape 拒绝、overwrite move、patch variants、图片资产校验、外部引用笔记创建、search 多匹配、tag 聚合。
+测试套件会启动 HTTP MCP Server，并覆盖所有暴露工具、认证失败、路径穿越拒绝、敏感目录拒绝、symlink escape 拒绝、缺失父目录时拒绝且不创建目录、Vault 根目录写入拒绝、一级写入白名单、overwrite move、patch variants、图片资产校验、外部引用笔记创建、search 多匹配、tag 聚合。
 
 还包含官方 `@modelcontextprotocol/sdk` Streamable HTTP client 兼容测试，会连接 `/mcp`、列出工具，并调用 `vault_read`、`vault_write`、`search_simple`。
 

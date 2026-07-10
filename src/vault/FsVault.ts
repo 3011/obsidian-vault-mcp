@@ -47,8 +47,11 @@ export class FsVault {
   private readonly backupBeforeWrite: boolean;
   private readonly backupDir: string;
   private readonly mutationJournal: MutationJournal | undefined;
+  private readonly validateDefaultWriteDir: boolean;
+  private readonly validateDefaultAssetDir: boolean;
 
   constructor(root: string, defaultWriteDir: string, options: {
+    writeAllowedRoots?: string[];
     assetsDirName?: string;
     maxImageAssetBytes?: number;
     allowedImageMimeTypes?: string[];
@@ -58,8 +61,10 @@ export class FsVault {
     backupBeforeWrite?: boolean;
     backupDir?: string;
     mutationJournal?: MutationJournal | undefined;
+    validateDefaultWriteDir?: boolean;
+    validateDefaultAssetDir?: boolean;
   } = {}) {
-    this.guard = new PathGuard(root, defaultWriteDir);
+    this.guard = new PathGuard(root, defaultWriteDir, options.writeAllowedRoots);
     this.assetsDirName = sanitizeDirName(options.assetsDirName || "assets");
     this.maxImageAssetBytes = options.maxImageAssetBytes || 10 * 1024 * 1024;
     this.allowedImageMimeTypes = options.allowedImageMimeTypes || ["image/png", "image/jpeg", "image/webp", "image/gif"];
@@ -69,10 +74,18 @@ export class FsVault {
     this.backupBeforeWrite = options.backupBeforeWrite ?? true;
     this.backupDir = sanitizeDirName(options.backupDir || ".backups");
     this.mutationJournal = options.mutationJournal;
+    this.validateDefaultWriteDir = options.validateDefaultWriteDir ?? false;
+    this.validateDefaultAssetDir = options.validateDefaultAssetDir ?? false;
   }
 
   async init(): Promise<void> {
     await this.guard.ensureRoot();
+    if (this.validateDefaultWriteDir) {
+      await this.guard.assertWritableDirectory(this.guard.defaultWriteDir, "default write directory");
+    }
+    if (this.validateDefaultAssetDir) {
+      await this.guard.assertWritableDirectory(`${this.guard.defaultWriteDir}/${this.assetsDirName}`, "default asset directory");
+    }
     await this.mutationJournal?.init();
   }
 
@@ -138,6 +151,7 @@ export class FsVault {
     const relative = this.guard.validateFilePath(filePath, { allowMissing: true });
     await this.locks.withLock([relative], async () => {
       try {
+        await this.guard.assertWritableParent(relative);
         const absolute = this.guard.resolveCreate(relative);
         await this.backupExisting(relative, "vault_write");
         await atomicWriteFile(absolute, content);
@@ -152,6 +166,7 @@ export class FsVault {
   async append(filePath: string, content: string): Promise<void> {
     const relative = this.guard.validateFilePath(filePath, { allowMissing: true });
     await this.locks.withLock([relative], async () => {
+      await this.guard.assertWritableParent(relative);
       const absolute = this.guard.resolveCreate(relative);
       let existing = "";
       try {
@@ -195,6 +210,8 @@ export class FsVault {
     return this.locks.withLock([relative], async () => {
       const savedAssets: ImageAssetResult[] = [];
       try {
+        await this.guard.assertWritableParent(relative);
+        await this.guard.assertWritableDirectory(assetDir, "asset directory");
         for (const asset of prepared) savedAssets.push(await this.savePreparedImageAsset(assetDir, asset));
         const noteContent = renderNoteWithAssets(content, savedAssets);
         const absolute = this.guard.resolveCreate(relative);
@@ -294,6 +311,7 @@ export class FsVault {
     return this.locks.withLock([sourceRelative, destinationRelative], async () => {
       try {
         const sourceAbsolute = await this.guard.resolveExisting(sourceRelative);
+        await this.guard.assertWritableParent(destinationRelative);
         const destinationAbsolute = this.guard.resolveCreate(destinationRelative);
         if (!allowOverwrite) {
           try {
@@ -305,7 +323,6 @@ export class FsVault {
         }
         await this.backupExisting(sourceRelative, "vault_move");
         if (allowOverwrite) await this.backupExisting(destinationRelative, "vault_move_overwrite");
-        await mkdir(path.dirname(destinationAbsolute), { recursive: true });
         const mutation = await this.mutationJournal?.createMove(sourceRelative, destinationRelative, allowOverwrite);
         if (allowOverwrite) await rm(destinationAbsolute, { force: true });
         await rename(sourceAbsolute, destinationAbsolute);
@@ -424,6 +441,7 @@ export class FsVault {
     const allowedExtensions = allowedImageExtensions(this.allowedImageMimeTypes);
     const dir = this.guard.validateAssetDir(assetDir);
     this.assertAssetDir(dir);
+    await this.guard.assertWritableDirectory(dir, "asset directory");
     const filename = await uniqueAssetFilename(asset.filename, asset.sha256, async (candidate) => {
       try {
         await stat(this.guard.resolveCreate(this.guard.validateAssetPath(`${dir}/${candidate}`, allowedExtensions)));

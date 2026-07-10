@@ -6,6 +6,7 @@ import { FsVault } from "./vault/FsVault.js";
 import { MutationJournal } from "./vault/mutationJournal.js";
 
 const vault = new FsVault(config.vaultRoot, config.defaultWriteDir, {
+  writeAllowedRoots: config.writeAllowedRoots,
   assetsDirName: config.assetsDirName,
   maxImageAssetBytes: config.maxImageAssetBytes,
   allowedImageMimeTypes: config.allowedImageMimeTypes,
@@ -14,7 +15,9 @@ const vault = new FsVault(config.vaultRoot, config.defaultWriteDir, {
   trashDir: config.trashDir,
   backupBeforeWrite: config.backupBeforeWrite,
   backupDir: config.backupDir,
-  mutationJournal: config.mutationQueueDir ? new MutationJournal(config.mutationQueueDir) : undefined
+  mutationJournal: config.mutationQueueDir ? new MutationJournal(config.mutationQueueDir) : undefined,
+  validateDefaultWriteDir: !config.readOnly && config.enableAppendToInbox,
+  validateDefaultAssetDir: !config.readOnly && config.enableImageAssets
 });
 await vault.init();
 
@@ -28,6 +31,7 @@ server.listen(config.port, config.host, () => {
     endpoint: config.mcpPath,
     vaultRoot: config.vaultRoot,
     defaultWriteDir: config.defaultWriteDir,
+    writeAllowedRoots: config.writeAllowedRoots,
     tokenRequired: config.requireToken
   }));
 });
