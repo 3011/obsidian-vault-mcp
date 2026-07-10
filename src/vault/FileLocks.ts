@@ -15,14 +15,15 @@ export class FileLocks {
     const current = new Promise<void>((resolve) => {
       release = resolve;
     });
-    this.tails.set(key, previous.then(() => current, () => current));
+    const tail = previous.then(() => current, () => current);
+    this.tails.set(key, tail);
 
     await previous.catch(() => undefined);
     try {
       return await this.withLockAt(keys, index + 1, operation);
     } finally {
       release();
-      if (this.tails.get(key) === current) {
+      if (this.tails.get(key) === tail) {
         this.tails.delete(key);
       }
     }

@@ -274,15 +274,38 @@ export class FsVault {
     if (!creationReason) throw new Error("reason is required and must explain why no existing directory is suitable");
     if (creationReason.length > 1000) throw new Error("reason must not exceed 1000 characters");
     const relative = this.guard.validateDirPath(parent ? `${parent}/${directoryName}` : directoryName);
+    const portableNameKey = directoryName.normalize("NFC").toLocaleLowerCase("en-US");
+    const portableNameLock = `directory-name:${parent}/${portableNameKey}`;
 
-    return this.locks.withLock([`${relative}/`], async () => {
+    return this.locks.withLock([relative, portableNameLock], async () => {
       try {
         if (parent) await this.guard.assertWritableDirectory(parent, "parent directory");
+        const parentAbsolute = parent ? this.guard.resolveCreate(parent) : this.guard.root;
+        const siblings = await readdir(parentAbsolute, { withFileTypes: true });
+        const conflictingSibling = siblings.find((entry) =>
+          entry.name.normalize("NFC").toLocaleLowerCase("en-US") === portableNameKey
+        );
+        if (conflictingSibling) {
+          if (conflictingSibling.name === directoryName && conflictingSibling.isDirectory()) {
+            throw new Error(`directory already exists: ${relative}; reuse the existing directory instead`);
+          }
+          if (conflictingSibling.name === directoryName) {
+            throw new Error(`path already exists and is not a directory: ${relative}`);
+          }
+          throw new Error(`directory name conflicts with existing path: ${conflictingSibling.name}; choose a distinct portable name`);
+        }
+
         const absolute = this.guard.resolveCreate(relative);
         try {
           await mkdir(absolute);
         } catch (error: any) {
-          if (error?.code === "EEXIST") throw new Error(`directory already exists: ${relative}; reuse the existing directory instead`, { cause: error });
+          if (error?.code === "EEXIST") {
+            const existing = await stat(absolute).catch(() => undefined);
+            if (existing?.isDirectory()) {
+              throw new Error(`directory already exists: ${relative}; reuse the existing directory instead`, { cause: error });
+            }
+            throw new Error(`path already exists and is not a directory: ${relative}`, { cause: error });
+          }
           if (error?.code === "ENOENT") throw new Error(`parent directory not found: ${parent || "/"}; create directories one level at a time`, { cause: error });
           throw error;
         }

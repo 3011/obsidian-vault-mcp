@@ -2,6 +2,12 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import assert from "node:assert/strict";
 import { callTool, createVaultServer } from "./helpers.js";
+import { FileLocks } from "../src/vault/FileLocks.js";
+
+const locks = new FileLocks();
+await Promise.all(Array.from({ length: 100 }, (_, index) => locks.withLock([`transient-${index}`], async () => undefined)));
+const lockInternals = locks as unknown as { tails: Map<string, Promise<void>> };
+assert.equal(lockInternals.tails.size, 0, "completed lock keys must be released from memory");
 
 const server = await createVaultServer();
 

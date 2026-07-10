@@ -6,6 +6,23 @@ const mdPath = { type: "string", description: "Vault-relative Markdown note path
 const vaultPath = { type: "string", description: "Vault-relative file path. Absolute paths and traversal are rejected." };
 
 export function buildTools(vault: FsVault): Tool[] {
+  const imageIntegrityRequired = config.imageAssetIntegrityMode === "required";
+  const imageAssetRequiredFields = [
+    "filename",
+    "mimeType",
+    "contentBase64",
+    ...(imageIntegrityRequired ? ["expectedSha256", "expectedSize"] : [])
+  ];
+  const expectedSha256Description = imageIntegrityRequired
+    ? "Required expected SHA-256 of the original decoded image bytes."
+    : "Optional expected SHA-256 of the original decoded image bytes. Recommended for lossless/original preservation.";
+  const expectedSizeDescription = imageIntegrityRequired
+    ? "Required expected decoded image byte size."
+    : "Optional expected decoded image byte size. Recommended with expectedSha256 for lossless/original preservation.";
+  const integrityModeDescription = imageIntegrityRequired
+    ? "The server is configured in required integrity mode, so expectedSha256 and expectedSize must be provided for every image."
+    : "Integrity fields are optional unless preserveOriginal requires them under the configured integrity mode.";
+
   const tools: Tool[] = [
     {
       name: "vault_list",
@@ -325,19 +342,19 @@ export function buildTools(vault: FsVault): Tool[] {
     {
       name: "vault_upload_image_asset",
       title: "Vault Upload Image Asset",
-      description: "Upload a small image asset into an existing vault assets directory and return an Obsidian embed link. This tool never creates asset directories. Only image MIME types are accepted.",
+      description: `Upload a small image asset into an existing vault assets directory and return an Obsidian embed link. This tool never creates asset directories. Only image MIME types are accepted. ${integrityModeDescription}`,
       inputSchema: {
         type: "object",
         properties: {
           filename: { type: "string", description: "Original image filename. The extension must match the MIME type." },
           mimeType: { type: "string", enum: ["image/png", "image/jpeg", "image/webp", "image/gif"], description: "Image MIME type for the decoded bytes." },
           contentBase64: { type: "string", description: "Base64-encoded image bytes." },
-          expectedSha256: { type: "string", description: "Optional expected SHA-256 of the original decoded image bytes. Recommended for lossless/original preservation." },
-          expectedSize: { type: "integer", minimum: 1, description: "Optional expected decoded image byte size. Recommended with expectedSha256 for lossless/original preservation." },
+          expectedSha256: { type: "string", description: expectedSha256Description },
+          expectedSize: { type: "integer", minimum: 1, description: expectedSizeDescription },
           preserveOriginal: { type: "boolean", description: "Set true when the upload must preserve original bytes; this requires expectedSha256 and expectedSize in the default integrity mode." },
           dir: { type: "string", description: "Optional vault-relative asset directory. Defaults to the inbox assets directory and must be an allowed assets path." }
         },
-        required: ["filename", "mimeType", "contentBase64"],
+        required: imageAssetRequiredFields,
         additionalProperties: false
       },
       handler: async (args) => {
@@ -356,7 +373,7 @@ export function buildTools(vault: FsVault): Tool[] {
     {
       name: "vault_create_note_with_assets",
       title: "Vault Create Note With Assets",
-      description: "Create a Markdown note and store small image assets in the existing adjacent assets directory, replacing {{asset:n}} placeholders with Obsidian embeds. Neither the note parent nor asset directory is created implicitly.",
+      description: `Create a Markdown note and store small image assets in the existing adjacent assets directory, replacing {{asset:n}} placeholders with Obsidian embeds. Neither the note parent nor asset directory is created implicitly. ${integrityModeDescription}`,
       inputSchema: {
         type: "object",
         properties: {
@@ -371,11 +388,11 @@ export function buildTools(vault: FsVault): Tool[] {
                 filename: { type: "string", description: "Original image filename. The extension must match the MIME type." },
                 mimeType: { type: "string", enum: ["image/png", "image/jpeg", "image/webp", "image/gif"], description: "Image MIME type for the decoded bytes." },
                 contentBase64: { type: "string", description: "Base64-encoded image bytes." },
-                expectedSha256: { type: "string", description: "Optional expected SHA-256 of the original decoded image bytes. Recommended for lossless/original preservation." },
-                expectedSize: { type: "integer", minimum: 1, description: "Optional expected decoded image byte size. Recommended with expectedSha256 for lossless/original preservation." },
+                expectedSha256: { type: "string", description: expectedSha256Description },
+                expectedSize: { type: "integer", minimum: 1, description: expectedSizeDescription },
                 preserveOriginal: { type: "boolean", description: "Set true when the upload must preserve original bytes; this requires expectedSha256 and expectedSize in the default integrity mode." }
               },
-              required: ["filename", "mimeType", "contentBase64"],
+              required: imageAssetRequiredFields,
               additionalProperties: false
             }
           }

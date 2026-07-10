@@ -434,6 +434,26 @@ async function testDirectoryPolicy(port: number): Promise<void> {
   }, /single path segment|one level at a time/i);
 
   await expectToolError(port, "vault_create_directory", {
+    parent: "Projects",
+    name: "x".repeat(201),
+    reason: "The directory name exceeds the server-side limit."
+  }, /must not exceed 200 characters/i);
+
+  await expectToolError(port, "vault_create_directory", {
+    parent: "Projects",
+    name: "中".repeat(86),
+    reason: "The directory name exceeds the filesystem UTF-8 byte limit."
+  }, /must not exceed 255 UTF-8 bytes/i);
+
+  for (const invalidName of ["bad:name", "trailing.", "CON"]) {
+    await expectToolError(port, "vault_create_directory", {
+      parent: "Projects",
+      name: invalidName,
+      reason: "This directory name is not portable across Obsidian desktop platforms."
+    }, /not portable|reserved on Windows/i);
+  }
+
+  await expectToolError(port, "vault_create_directory", {
     parent: "Projects/Missing-Parent",
     name: "Child",
     reason: "The parent does not exist."
@@ -454,6 +474,17 @@ async function testDirectoryPolicy(port: number): Promise<void> {
   });
   assert.equal(createdUnderOther.path, "Other/Agent-Created");
   assert.equal((await stat(path.join(vault, createdUnderOther.path))).isDirectory(), true);
+
+  await callTool(port, "vault_create_directory", {
+    parent: "Other",
+    name: "Portable-Name",
+    reason: "This creates a portable directory name for conflict testing."
+  });
+  await expectToolError(port, "vault_create_directory", {
+    parent: "Other",
+    name: "portable-name",
+    reason: "This case-only variant would collide on common Obsidian desktop platforms."
+  }, /conflicts with existing path.*Portable-Name/i);
 
   const createdTopLevel = await callTool(port, "vault_create_directory", {
     parent: "",

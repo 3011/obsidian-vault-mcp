@@ -71,9 +71,19 @@ export class PathGuard {
 
   validateDirectoryName(rawName: unknown): string {
     if (typeof rawName !== "string" || rawName.trim() === "") throw new Error("directory name is required");
-    const name = rawName.trim();
+    const name = rawName.trim().normalize("NFC");
+    if (name.length > 200) throw new Error("directory name must not exceed 200 characters");
+    if (Buffer.byteLength(name, "utf8") > 255) throw new Error("directory name must not exceed 255 UTF-8 bytes");
     if (name.includes("/") || name.includes("\\")) {
       throw new Error("directory name must be a single path segment; create nested directories one level at a time");
+    }
+    // Keep explicitly-created directories portable across common Obsidian desktop platforms.
+    // eslint-disable-next-line no-control-regex
+    if (/[<>:"|?*\x00-\x1f]/.test(name) || /[. ]$/.test(name)) {
+      throw new Error("directory name contains characters that are not portable across Obsidian platforms");
+    }
+    if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i.test(name)) {
+      throw new Error("directory name is reserved on Windows");
     }
     const normalized = this.validateDirPath(name);
     if (!normalized || normalized.includes("/")) throw new Error("directory name must be a single path segment");

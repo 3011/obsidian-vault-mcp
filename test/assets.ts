@@ -31,6 +31,9 @@ async function testToolDiscovery(): Promise<void> {
   assert(names.includes("vault_upload_image_asset"));
   assert(names.includes("vault_create_note_with_assets"));
   assert(names.includes("vault_create_external_reference_note"));
+  const upload = tools.result.tools.find((tool: any) => tool.name === "vault_upload_image_asset");
+  assert(!upload.inputSchema.required.includes("expectedSha256"));
+  assert(!upload.inputSchema.required.includes("expectedSize"));
 }
 
 async function testUploadImages(): Promise<void> {
@@ -110,6 +113,16 @@ async function testImageIntegrity(): Promise<void> {
 
   const requiredServer = await createVaultServer({ MAX_IMAGE_ASSET_BYTES: "32", IMAGE_ASSET_INTEGRITY_MODE: "required" });
   try {
+    const requiredTools = await rpc(requiredServer.port, { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} });
+    const requiredUpload = requiredTools.result.tools.find((tool: any) => tool.name === "vault_upload_image_asset");
+    assert(requiredUpload.inputSchema.required.includes("expectedSha256"));
+    assert(requiredUpload.inputSchema.required.includes("expectedSize"));
+    assert.match(requiredUpload.description, /required integrity mode/i);
+    const requiredNote = requiredTools.result.tools.find((tool: any) => tool.name === "vault_create_note_with_assets");
+    const requiredAssetFields = requiredNote.inputSchema.properties.assets.items.required;
+    assert(requiredAssetFields.includes("expectedSha256"));
+    assert(requiredAssetFields.includes("expectedSize"));
+
     await expectToolError(requiredServer.port, "vault_upload_image_asset", {
       filename: "required.png",
       mimeType: "image/png",
