@@ -32,8 +32,6 @@ spec:
               value: /data/vault
             - name: DEFAULT_WRITE_DIR
               value: 98-Inbox
-            - name: WRITE_ALLOWED_ROOTS
-              value: 00-系统,01-归档,02-学习,03-工作,04-个人,98-Inbox,99-回收站
             - name: MAX_REQUEST_BYTES
               value: "16777216"
             - name: MCP_REQUIRE_TOKEN
@@ -49,6 +47,8 @@ spec:
             - name: ENABLE_VAULT_DELETE
               value: "true"
             - name: ENABLE_VAULT_MOVE
+              value: "true"
+            - name: ENABLE_VAULT_CREATE_DIRECTORY
               value: "true"
             - name: ENABLE_APPEND_TO_INBOX
               value: "true"

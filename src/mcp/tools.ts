@@ -2,7 +2,7 @@ import { config } from "../config.js";
 import { FsVault } from "../vault/FsVault.js";
 import type { Tool } from "./types.js";
 
-const mdPath = { type: "string", description: "Vault-relative Markdown note path ending in .md. The parent directory must already exist; writes to the vault root, absolute paths, traversal, and unapproved write roots are rejected." };
+const mdPath = { type: "string", description: "Vault-relative Markdown note path ending in .md. The parent directory must already exist; writes to the vault root, absolute paths, and traversal are rejected." };
 const vaultPath = { type: "string", description: "Vault-relative file path. Absolute paths and traversal are rejected." };
 
 export function buildTools(vault: FsVault): Tool[] {
@@ -65,7 +65,7 @@ export function buildTools(vault: FsVault): Tool[] {
     {
       name: "vault_write",
       title: "Vault Write",
-      description: "Create or overwrite a Markdown note inside an existing approved directory. This tool never creates directories. Inspect the vault with vault_list first; when classification is uncertain, use append_to_inbox.",
+      description: "Create or overwrite a Markdown note inside an existing directory. Before writing, inspect the current directory structure with vault_list or vault_list_detailed and reuse a suitable directory. If no suitable directory exists, call vault_create_directory first. This tool never creates directories implicitly.",
       inputSchema: {
         type: "object",
         properties: { path: mdPath, content: { type: "string", description: "Full Markdown content." } },
@@ -80,7 +80,7 @@ export function buildTools(vault: FsVault): Tool[] {
     {
       name: "vault_append",
       title: "Vault Append",
-      description: "Append Markdown content to a note, creating the Markdown file if missing. Its parent directory must already exist; this tool never creates directories. Use append_to_inbox when classification is uncertain.",
+      description: "Append Markdown content to a note, creating the Markdown file if missing. Inspect existing directories first and reuse a suitable one; if none exists, call vault_create_directory. Its parent directory must already exist and this tool never creates directories implicitly.",
       inputSchema: {
         type: "object",
         properties: { path: mdPath, content: { type: "string", description: "Markdown content to append." } },
@@ -90,6 +90,25 @@ export function buildTools(vault: FsVault): Tool[] {
       handler: async (args) => {
         await vault.append(String(args.path), String(args.content ?? ""));
         return { message: "OK" };
+      }
+    },
+    {
+      name: "vault_create_directory",
+      title: "Vault Create Directory",
+      description: "Create exactly one new vault directory after inspecting the existing directory structure and determining that no suitable directory exists. The parent directory must already exist unless creating a new top-level directory, and nested paths must be created one level at a time. The reason must explain why existing directories are unsuitable and what the new directory will contain.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          parent: { type: "string", description: "Existing vault-relative parent directory. Use an empty string to create a new top-level directory." },
+          name: { type: "string", minLength: 1, maxLength: 200, description: "Single directory name only; slashes are rejected." },
+          reason: { type: "string", minLength: 1, maxLength: 1000, description: "Why no existing directory is suitable and what content belongs in the new directory." }
+        },
+        required: ["parent", "name", "reason"],
+        additionalProperties: false
+      },
+      handler: async (args) => {
+        const result = await vault.createDirectory(String(args.parent ?? ""), String(args.name ?? ""), String(args.reason ?? ""));
+        return { message: "OK", ...result };
       }
     },
     {
@@ -162,7 +181,7 @@ export function buildTools(vault: FsVault): Tool[] {
     {
       name: "vault_move",
       title: "Vault Move",
-      description: "Move or rename a vault file into an existing approved destination directory. This tool never creates directories. If destination ends with '/', the original filename is preserved. Markdown files cannot be renamed to non-Markdown paths, or vice versa.",
+      description: "Move or rename a vault file into an existing destination directory. This tool never creates directories. If destination ends with '/', the original filename is preserved. Markdown files cannot be renamed to non-Markdown paths, or vice versa.",
       inputSchema: {
         type: "object",
         properties: {
@@ -288,7 +307,7 @@ export function buildTools(vault: FsVault): Tool[] {
     {
       name: "append_to_inbox",
       title: "Append To Inbox",
-      description: "Append Markdown content to a note under the configured default inbox directory. Use this when no existing planned directory clearly matches; the inbox directory must already exist.",
+      description: "Append Markdown content to a note under the configured default inbox directory. Prefer inspecting existing directories and creating a justified directory with vault_create_directory when the content has a clear long-term category. Use this inbox tool for quick capture or genuinely unclassified material; the inbox directory must already exist.",
       inputSchema: {
         type: "object",
         properties: {
@@ -306,7 +325,7 @@ export function buildTools(vault: FsVault): Tool[] {
     {
       name: "vault_upload_image_asset",
       title: "Vault Upload Image Asset",
-      description: "Upload a small image asset into an existing approved vault assets directory and return an Obsidian embed link. This tool never creates asset directories. Only image MIME types are accepted.",
+      description: "Upload a small image asset into an existing vault assets directory and return an Obsidian embed link. This tool never creates asset directories. Only image MIME types are accepted.",
       inputSchema: {
         type: "object",
         properties: {
@@ -369,7 +388,7 @@ export function buildTools(vault: FsVault): Tool[] {
     {
       name: "vault_create_external_reference_note",
       title: "Vault Create External Reference Note",
-      description: "Create a structured Markdown note inside an existing approved directory that references external source files without uploading those files into the vault. This tool never creates directories.",
+      description: "Create a structured Markdown note inside an existing directory that references external source files without uploading those files into the vault. This tool never creates directories.",
       inputSchema: {
         type: "object",
         properties: {
@@ -429,6 +448,7 @@ function toolEnabled(name: string): boolean {
     if (name === "vault_patch") return config.enableVaultPatch;
     if (name === "vault_delete") return config.enableVaultDelete;
     if (name === "vault_move") return config.enableVaultMove;
+    if (name === "vault_create_directory") return config.enableVaultCreateDirectory;
     if (name === "append_to_inbox") return config.enableAppendToInbox;
     if (name === "vault_upload_image_asset") return config.enableImageAssets;
     if (name === "vault_create_note_with_assets") return config.enableImageAssets;
@@ -442,6 +462,7 @@ function toolEnabled(name: string): boolean {
     "vault_patch",
     "vault_delete",
     "vault_move",
+    "vault_create_directory",
     "append_to_inbox",
     "vault_upload_image_asset",
     "vault_create_note_with_assets",

@@ -30,8 +30,8 @@ spec:
               value: /data/vault
             - name: DEFAULT_WRITE_DIR
               value: 98-Inbox
-            - name: WRITE_ALLOWED_ROOTS
-              value: 98-Inbox
+            - name: ENABLE_VAULT_CREATE_DIRECTORY
+              value: "true"
             - name: MCP_TOKEN
               valueFrom:
                 secretKeyRef:

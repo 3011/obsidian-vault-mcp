@@ -79,7 +79,6 @@ const child = spawn(process.execPath, ["dist/src/server.js"], {
     MCP_PORT: String(port),
     MCP_TOKEN: "test-token",
     VAULT_ROOT: vault,
-    WRITE_ALLOWED_ROOTS: "98-Inbox,Projects",
     MAX_REQUEST_BYTES: "4096"
   },
   stdio: ["ignore", "pipe", "pipe"]
@@ -222,6 +221,7 @@ async function testToolDiscovery(port: number): Promise<void> {
     "vault_patch",
     "vault_delete",
     "vault_move",
+    "vault_create_directory",
     "vault_get_document_map",
     "search_simple",
     "search_query",
@@ -410,6 +410,61 @@ async function testWriteAppendMoveDelete(port: number): Promise<void> {
 }
 
 async function testDirectoryPolicy(port: number): Promise<void> {
+  const created = await callTool(port, "vault_create_directory", {
+    parent: "Projects",
+    name: "Agent-Created",
+    reason: "Existing project directories do not match this new independent workstream."
+  });
+  assert.equal(created.path, "Projects/Agent-Created");
+  const createdStat = await stat(path.join(vault, created.path));
+  assert.equal(createdStat.isDirectory(), true);
+  await callTool(port, "vault_write", { path: "Projects/Agent-Created/note.md", content: "created after deliberate classification\n" });
+  assert.match(await readFile(path.join(vault, "Projects", "Agent-Created", "note.md"), "utf8"), /deliberate classification/);
+
+  await expectToolError(port, "vault_create_directory", {
+    parent: "Projects",
+    name: "Agent-Created",
+    reason: "Trying the same directory again."
+  }, /directory already exists.*reuse the existing directory/i);
+
+  await expectToolError(port, "vault_create_directory", {
+    parent: "Projects",
+    name: "Nested/Child",
+    reason: "This should be created one level at a time."
+  }, /single path segment|one level at a time/i);
+
+  await expectToolError(port, "vault_create_directory", {
+    parent: "Projects/Missing-Parent",
+    name: "Child",
+    reason: "The parent does not exist."
+  }, /parent directory not found/i);
+  await assert.rejects(() => stat(path.join(vault, "Projects", "Missing-Parent")), /ENOENT/);
+
+  await expectToolError(port, "vault_create_directory", {
+    parent: "Projects",
+    name: "No-Reason",
+    reason: "   "
+  }, /reason is required/i);
+  await assert.rejects(() => stat(path.join(vault, "Projects", "No-Reason")), /ENOENT/);
+
+  const createdUnderOther = await callTool(port, "vault_create_directory", {
+    parent: "Other",
+    name: "Agent-Created",
+    reason: "The existing directories do not cover this independent category, so it belongs under Other."
+  });
+  assert.equal(createdUnderOther.path, "Other/Agent-Created");
+  assert.equal((await stat(path.join(vault, createdUnderOther.path))).isDirectory(), true);
+
+  const createdTopLevel = await callTool(port, "vault_create_directory", {
+    parent: "",
+    name: "New-Top-Level",
+    reason: "No existing top-level category matches this durable area of knowledge."
+  });
+  assert.equal(createdTopLevel.path, "New-Top-Level");
+  assert.equal((await stat(path.join(vault, createdTopLevel.path))).isDirectory(), true);
+  await callTool(port, "vault_write", { path: "New-Top-Level/note.md", content: "top-level directory created explicitly\n" });
+  assert.match(await readFile(path.join(vault, "New-Top-Level", "note.md"), "utf8"), /created explicitly/);
+
   await expectToolError(port, "vault_write", {
     path: "Projects/Unplanned/note.md",
     content: "must not create parent\n"
@@ -428,11 +483,11 @@ async function testDirectoryPolicy(port: number): Promise<void> {
   }, /writes to the vault root are not allowed/i);
   await assert.rejects(() => stat(path.join(vault, "root-note.md")), /ENOENT/);
 
-  await expectToolError(port, "vault_write", {
-    path: "Other/blocked.md",
-    content: "blocked root\n"
-  }, /write root is not allowed: Other/i);
-  await assert.rejects(() => stat(path.join(vault, "Other", "blocked.md")), /ENOENT/);
+  await callTool(port, "vault_write", {
+    path: "Other/allowed.md",
+    content: "existing directories are writable without a root allowlist\n"
+  });
+  assert.match(await readFile(path.join(vault, "Other", "allowed.md"), "utf8"), /without a root allowlist/);
 
   await callTool(port, "vault_write", {
     path: "Projects/move-policy-source.md",
@@ -625,6 +680,7 @@ async function testReadOnlyMode(): Promise<void> {
     assert(names.includes("find_asset_references"));
     assert(names.includes("asset_audit"));
     assert(!names.includes("vault_write"));
+    assert(!names.includes("vault_create_directory"));
     assert(!names.includes("vault_delete"));
     assert(!names.includes("vault_upload_image_asset"));
     assert(!names.includes("vault_create_note_with_assets"));

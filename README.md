@@ -99,7 +99,6 @@ The configured inbox and default asset directory must already exist. Note-writin
 | `VAULT_ROOT` | `/data/vault` | Markdown vault root. |
 | `MUTATION_QUEUE_DIR` | empty | Optional absolute WAL directory for LiveSync delete/move mutation intents. Must not be inside `VAULT_ROOT`. |
 | `DEFAULT_WRITE_DIR` | `98-Inbox` | Existing inbox directory for `append_to_inbox`. Startup fails when the tool is enabled and this directory is missing. |
-| `WRITE_ALLOWED_ROOTS` | empty | Optional comma-separated allowlist of existing top-level write directories. Empty allows any existing top-level directory; vault-root writes are still rejected. |
 | `MAX_REQUEST_BYTES` | `16777216` | Maximum JSON request body size. Keep this larger than base64-encoded image assets. |
 | `READ_ONLY` | `false` | Hide all mutating tools when true. |
 | `ENABLE_VAULT_WRITE` | `true` | Expose `vault_write`. |
@@ -107,6 +106,7 @@ The configured inbox and default asset directory must already exist. Note-writin
 | `ENABLE_VAULT_PATCH` | `true` | Expose `vault_patch`. |
 | `ENABLE_VAULT_DELETE` | `true` | Expose `vault_delete`. |
 | `ENABLE_VAULT_MOVE` | `true` | Expose `vault_move`. |
+| `ENABLE_VAULT_CREATE_DIRECTORY` | `true` | Expose deliberate one-level directory creation. |
 | `ENABLE_APPEND_TO_INBOX` | `true` | Expose `append_to_inbox`. |
 | `ENABLE_IMAGE_ASSETS` | `true` | Expose image asset upload and note-with-assets tools. |
 | `ENABLE_EXTERNAL_REFERENCE_NOTES` | `true` | Expose external reference note creation. |
@@ -132,7 +132,7 @@ The server allows destructive tools when enabled, but still enforces baseline fi
 - no temp/swap files;
 - no writes directly in the vault root;
 - no implicit parent-directory creation by note, asset, or move tools;
-- optional top-level write allowlist via `WRITE_ALLOWED_ROOTS`;
+- explicit `vault_create_directory` creates one level only, requires a reason, and is intended only after inspecting existing directories; an empty parent creates a new top-level directory;
 - startup validation for the configured inbox and default asset directory when their tools are enabled;
 - no arbitrary attachment uploads; only small image assets are accepted as vault files;
 - per-file locks for write, append, patch, move, and delete;

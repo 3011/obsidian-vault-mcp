@@ -7,19 +7,10 @@ const FORBIDDEN_SUFFIXES = [".tmp", ".swp", ".swo"];
 export class PathGuard {
   readonly root: string;
   readonly defaultWriteDir: string;
-  readonly writeAllowedRoots: readonly string[];
-
-  constructor(root: string, defaultWriteDir: string, writeAllowedRoots: string[] = []) {
+  constructor(root: string, defaultWriteDir: string) {
     this.root = path.resolve(root);
     this.defaultWriteDir = this.validateDirPath(defaultWriteDir);
     if (!this.defaultWriteDir) throw new Error("default write directory is required");
-    this.writeAllowedRoots = [...new Set(writeAllowedRoots.map((value) => {
-      const normalized = this.validateDirPath(value);
-      if (!normalized || normalized.includes("/")) {
-        throw new Error(`write allowed root must be a top-level directory: ${value}`);
-      }
-      return normalized;
-    }))];
   }
 
   async ensureRoot(): Promise<void> {
@@ -75,6 +66,17 @@ export class PathGuard {
       const filename = path.posix.basename(sourcePath);
       return `${normalized}${filename}`;
     }
+    return normalized;
+  }
+
+  validateDirectoryName(rawName: unknown): string {
+    if (typeof rawName !== "string" || rawName.trim() === "") throw new Error("directory name is required");
+    const name = rawName.trim();
+    if (name.includes("/") || name.includes("\\")) {
+      throw new Error("directory name must be a single path segment; create nested directories one level at a time");
+    }
+    const normalized = this.validateDirPath(name);
+    if (!normalized || normalized.includes("/")) throw new Error("directory name must be a single path segment");
     return normalized;
   }
 
@@ -136,7 +138,6 @@ export class PathGuard {
     if (!normalized) {
       throw new Error("the vault root cannot be used as a write directory; choose an existing subdirectory or use append_to_inbox");
     }
-    this.assertAllowedWriteRoot(normalized);
     const absolute = this.resolveCreate(normalized);
     let fileStat: Awaited<ReturnType<typeof lstat>>;
     try {
@@ -177,13 +178,6 @@ export class PathGuard {
     if (base === ".DS_Store" || FORBIDDEN_SUFFIXES.some((suffix) => base.endsWith(suffix))) {
       throw new Error("temporary files are not allowed");
     }
-  }
-
-  private assertAllowedWriteRoot(relativePath: string): void {
-    if (this.writeAllowedRoots.length === 0) return;
-    const root = relativePath.split("/", 1)[0];
-    if (root && this.writeAllowedRoots.includes(root)) return;
-    throw new Error(`write root is not allowed: ${root || relativePath}; allowed roots: ${this.writeAllowedRoots.join(", ")}`);
   }
 
   private validateRelativePath(rawPath: unknown, label: "path" | "destination"): string {

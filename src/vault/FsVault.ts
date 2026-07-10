@@ -51,7 +51,6 @@ export class FsVault {
   private readonly validateDefaultAssetDir: boolean;
 
   constructor(root: string, defaultWriteDir: string, options: {
-    writeAllowedRoots?: string[];
     assetsDirName?: string;
     maxImageAssetBytes?: number;
     allowedImageMimeTypes?: string[];
@@ -64,7 +63,7 @@ export class FsVault {
     validateDefaultWriteDir?: boolean;
     validateDefaultAssetDir?: boolean;
   } = {}) {
-    this.guard = new PathGuard(root, defaultWriteDir, options.writeAllowedRoots);
+    this.guard = new PathGuard(root, defaultWriteDir);
     this.assetsDirName = sanitizeDirName(options.assetsDirName || "assets");
     this.maxImageAssetBytes = options.maxImageAssetBytes || 10 * 1024 * 1024;
     this.allowedImageMimeTypes = options.allowedImageMimeTypes || ["image/png", "image/jpeg", "image/webp", "image/gif"];
@@ -263,6 +262,34 @@ export class FsVault {
         await audit("vault_patch", "success", { path: relative, targetType: args.targetType, target: args.target, operation: args.operation });
       } catch (error) {
         await audit("vault_patch", "failure", { path: relative, targetType: args.targetType, target: args.target, operation: args.operation, error: errorMessage(error) });
+        throw error;
+      }
+    });
+  }
+
+  async createDirectory(parentPath: string, name: string, reason: string): Promise<{ path: string }> {
+    const parent = this.guard.validateDirPath(parentPath);
+    const directoryName = this.guard.validateDirectoryName(name);
+    const creationReason = reason.trim();
+    if (!creationReason) throw new Error("reason is required and must explain why no existing directory is suitable");
+    if (creationReason.length > 1000) throw new Error("reason must not exceed 1000 characters");
+    const relative = this.guard.validateDirPath(parent ? `${parent}/${directoryName}` : directoryName);
+
+    return this.locks.withLock([`${relative}/`], async () => {
+      try {
+        if (parent) await this.guard.assertWritableDirectory(parent, "parent directory");
+        const absolute = this.guard.resolveCreate(relative);
+        try {
+          await mkdir(absolute);
+        } catch (error: any) {
+          if (error?.code === "EEXIST") throw new Error(`directory already exists: ${relative}; reuse the existing directory instead`, { cause: error });
+          if (error?.code === "ENOENT") throw new Error(`parent directory not found: ${parent || "/"}; create directories one level at a time`, { cause: error });
+          throw error;
+        }
+        await audit("vault_create_directory", "success", { path: relative, parent, name: directoryName, reason: creationReason });
+        return { path: relative };
+      } catch (error) {
+        await audit("vault_create_directory", "failure", { path: relative, parent, name: directoryName, reason: creationReason, error: errorMessage(error) });
         throw error;
       }
     });

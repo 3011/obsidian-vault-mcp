@@ -99,7 +99,6 @@ MCP_TOKEN=change-me VAULT_ROOT=/tmp/vault npm start
 | `VAULT_ROOT` | `/data/vault` | Markdown vault 根目录。 |
 | `MUTATION_QUEUE_DIR` | empty | 可选的 LiveSync delete/move mutation intent WAL 绝对路径，不能位于 `VAULT_ROOT` 内。 |
 | `DEFAULT_WRITE_DIR` | `98-Inbox` | `append_to_inbox` 使用的现有 Inbox 目录；工具启用时若目录不存在，服务启动失败。 |
-| `WRITE_ALLOWED_ROOTS` | empty | 可选的一级写入目录白名单，逗号分隔。为空时允许任意已存在的一级目录，但仍禁止直接写 Vault 根目录。 |
 | `MAX_REQUEST_BYTES` | `16777216` | JSON 请求体大小限制，需要大于 base64 图片资产大小。 |
 | `READ_ONLY` | `false` | 为 true 时隐藏所有 mutating tools。 |
 | `ENABLE_VAULT_WRITE` | `true` | 暴露 `vault_write`。 |
@@ -107,6 +106,7 @@ MCP_TOKEN=change-me VAULT_ROOT=/tmp/vault npm start
 | `ENABLE_VAULT_PATCH` | `true` | 暴露 `vault_patch`。 |
 | `ENABLE_VAULT_DELETE` | `true` | 暴露 `vault_delete`。 |
 | `ENABLE_VAULT_MOVE` | `true` | 暴露 `vault_move`。 |
+| `ENABLE_VAULT_CREATE_DIRECTORY` | `true` | 暴露受控的单级目录创建能力。 |
 | `ENABLE_APPEND_TO_INBOX` | `true` | 暴露 `append_to_inbox`。 |
 | `ENABLE_IMAGE_ASSETS` | `true` | 暴露图片资产上传和图文笔记工具。 |
 | `ENABLE_EXTERNAL_REFERENCE_NOTES` | `true` | 暴露外部引用笔记创建工具。 |
@@ -132,7 +132,7 @@ MCP_TOKEN=change-me VAULT_ROOT=/tmp/vault npm start
 - 不允许临时/交换文件；
 - 禁止直接写入 Vault 根目录；
 - 笔记、附件和移动工具不会隐式创建父目录；
-- 可通过 `WRITE_ALLOWED_ROOTS` 限制允许写入的一级目录；
+- 显式的 `vault_create_directory` 每次只创建一级目录并要求填写理由，只应在检查现有目录后使用；父目录为空时可创建新的一级目录；
 - 相应工具启用时，启动阶段会校验 Inbox 和默认附件目录已经存在；
 - 不支持任意附件上传，只允许小型图片资产作为 vault 文件；
 - write、append、patch、move、delete 使用 per-file lock；
