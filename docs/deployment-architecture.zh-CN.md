@@ -70,6 +70,17 @@ BACKUP_BEFORE_WRITE=true
 ENABLE_AUDIT_LOG=true
 ```
 
+### WAL v2 升级顺序
+
+WAL v2 增加 `localCommittedAt`、`remoteVerifiedAt`、`remoteVerification` 和结构化终态错误。生产升级必须采用 Controller-first：
+
+1. 先部署能同时读取 v1/v2 的新 Controller；
+2. 验证旧 v1 mutation 仍可完成；
+3. 再部署开始写 v2 WAL 的 MCP；
+4. 验证 move/delete 返回的 `operationId` 可查询，并最终出现 `remoteVerifiedAt`。
+
+回滚时先停止产生新 v2 WAL，等待 v2 非终态记录清空，再回滚 Controller。旧 Controller 不得消费依赖 v2 恢复语义的非终态记录。
+
 ### Private tunnel client
 
 tunnel client 可以作为独立 Deployment 或 sidecar 运行。它通过 outbound HTTPS 连接 tunnel provider，并把 MCP 请求转发到集群内 MCP Service：

@@ -70,6 +70,17 @@ BACKUP_BEFORE_WRITE=true
 ENABLE_AUDIT_LOG=true
 ```
 
+### WAL v2 rollout order
+
+WAL v2 adds `localCommittedAt`, `remoteVerifiedAt`, `remoteVerification`, and structured terminal errors. Production rollout must be Controller-first:
+
+1. Deploy the new Controller that reads both v1 and v2 records.
+2. Verify that an existing v1 mutation can still complete.
+3. Deploy the MCP version that starts writing v2 records.
+4. Verify that returned move/delete `operationId` values are queryable and eventually contain `remoteVerifiedAt`.
+
+For rollback, first stop new v2 production, wait until no v2 non-terminal records remain, and only then roll back the Controller. An old Controller must not consume non-terminal records that rely on v2 recovery semantics.
+
 ### Private tunnel client
 
 Run the tunnel client as a separate Deployment or sidecar. It should make outbound HTTPS requests to the tunnel provider and forward MCP requests to the in-cluster MCP Service:

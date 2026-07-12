@@ -34,6 +34,11 @@ async function testDeleteMutation(): Promise<void> {
     const commands = await readCommands(fixture.log);
     assert.deepEqual(commands.map((command) => command.command).slice(0, 3), ["rm", "sync", "info"]);
     assert.equal(commands.at(0)?.args.at(-1), "Notes/delete.md");
+    const done = await readDoneRecord(fixture, "delete-1");
+    assert.equal(done.schemaVersion, 2);
+    assert.equal(typeof done.remoteVerifiedAt, "string");
+    assert.equal((done.remoteVerification as any)?.method, "livesync-cli-post-sync-info");
+    assert.equal((done.remoteVerification as any)?.pathState, "not-active");
   } finally {
     await rm(fixture.root, { recursive: true, force: true });
   }
@@ -126,6 +131,9 @@ async function testPendingDeleteRecovery(): Promise<void> {
     controller.kill("SIGTERM");
     const commands = await readCommands(fixture.log);
     assert.equal(commands.at(0)?.command, "rm");
+    const done = await readDoneRecord(fixture, "pending-delete-1");
+    assert.equal(typeof done.localCommittedAt, "string");
+    assert.equal(typeof done.remoteVerifiedAt, "string");
   } finally {
     await rm(fixture.root, { recursive: true, force: true });
   }
@@ -294,6 +302,20 @@ async function ageMutation(root: string, state: string, id: string): Promise<voi
   const file = path.join(root, state, `${id}.json`);
   const old = new Date(Date.now() - 60_000);
   await utimes(file, old, old);
+}
+
+async function readDoneRecord(fixture: Fixture, id: string): Promise<Record<string, unknown>> {
+  const doneRoot = path.join(fixture.mutations, "done");
+  const dates = await readdir(doneRoot).catch(() => []);
+  for (const date of dates) {
+    const file = path.join(doneRoot, date, `${id}.json`);
+    try {
+      return JSON.parse(await readFile(file, "utf8")) as Record<string, unknown>;
+    } catch (error: any) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+  }
+  throw new Error(`done mutation not found: ${id}`);
 }
 
 async function waitForDone(fixture: Fixture, id: string, controller?: ReturnType<typeof startController>): Promise<void> {

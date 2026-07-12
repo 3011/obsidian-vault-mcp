@@ -2,7 +2,7 @@ import { mkdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { callTool, createVaultServer, expectToolError, rpc } from "./helpers.js";
+import { callTool, createVaultServer, expectInvalidArguments, expectToolError, rpc } from "./helpers.js";
 
 const png = b64([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]);
 const jpeg = b64([0xff, 0xd8, 0xff, 0x00]);
@@ -123,11 +123,11 @@ async function testImageIntegrity(): Promise<void> {
     assert(requiredAssetFields.includes("expectedSha256"));
     assert(requiredAssetFields.includes("expectedSize"));
 
-    await expectToolError(requiredServer.port, "vault_upload_image_asset", {
+    await expectInvalidArguments(requiredServer.port, "vault_upload_image_asset", {
       filename: "required.png",
       mimeType: "image/png",
       contentBase64: png
-    }, /expectedSha256 is required/i);
+    }, /expectedSha256|expectedSize|required/i);
     const requiredResult = await callTool(requiredServer.port, "vault_upload_image_asset", {
       filename: "required.png",
       mimeType: "image/png",
@@ -209,11 +209,11 @@ async function testExternalReferenceNote(): Promise<void> {
 }
 
 async function testRejectedAssets(): Promise<void> {
-  await expectToolError(server.port, "vault_upload_image_asset", {
+  await expectInvalidArguments(server.port, "vault_upload_image_asset", {
     filename: "bad.pdf",
     mimeType: "application/pdf",
     contentBase64: pdf
-  }, /MIME type is not allowed/i);
+  }, /enum|allowed values/i);
   await expectToolError(server.port, "vault_upload_image_asset", {
     filename: "bad.png",
     mimeType: "image/png",

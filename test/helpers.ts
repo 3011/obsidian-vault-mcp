@@ -76,6 +76,13 @@ export async function expectToolError(port: number, name: string, args: Record<s
   assert.match(response.result.content[0].text, pattern);
 }
 
+export async function expectInvalidArguments(port: number, name: string, args: Record<string, unknown>, pattern?: RegExp): Promise<void> {
+  const response = await rpc(port, { jsonrpc: "2.0", id: Math.random(), method: "tools/call", params: { name, arguments: args } });
+  assert.equal(response.error?.code, -32602, JSON.stringify(response));
+  assert.equal(response.error?.data?.errorCode, "INVALID_ARGUMENT", JSON.stringify(response));
+  if (pattern) assert.match(JSON.stringify(response.error?.data?.issues ?? []), pattern);
+}
+
 function unwrapStructuredContent(value: any): any {
   if (value && typeof value === "object" && Object.keys(value).length === 1 && "result" in value) return value.result;
   return value;

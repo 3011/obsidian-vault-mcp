@@ -1,11 +1,13 @@
-import { copyFile, mkdir, readdir, readFile, rename, rm, rmdir, stat } from "node:fs/promises";
+import { copyFile, mkdir, open, readdir, readFile, rename, rm, rmdir, stat } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import path from "node:path";
-import { atomicWriteFile } from "./atomicWrite.js";
+import { atomicCreateFile, atomicWriteFile } from "./atomicWrite.js";
+import { ToolDomainError } from "../mcp/errors.js";
 import { audit } from "./audit.js";
 import { assetAudit, findAssetReferences, vaultListDetailed, type AssetAuditArgs, type FindAssetReferencesArgs, type VaultListDetailedArgs } from "./assetAudit.js";
 import { FileLocks } from "./FileLocks.js";
 import { PathGuard } from "./pathGuard.js";
-import { MutationJournal } from "./mutationJournal.js";
+import { MutationJournal, type OperationStatus, type PendingMutation } from "./mutationJournal.js";
 import { getDocumentMap } from "../markdown/documentMap.js";
 import { frontmatterTags, parseFrontmatter } from "../markdown/frontmatter.js";
 import { patchMarkdown, type PatchArgs } from "../markdown/patch.js";
@@ -33,6 +35,28 @@ export type SearchQueryArgs = {
   frontmatter?: Record<string, unknown>;
   content?: string;
   limit?: number;
+};
+
+export type FileRevision = {
+  sha256: string;
+  size: number;
+  mtimeMs: number;
+};
+
+export type LocalFileMutationResult = {
+  path: string;
+  revision: FileRevision;
+};
+
+export type DeleteMutationResult = {
+  path: string;
+  operationId?: string;
+};
+
+export type MoveMutationResult = {
+  oldPath: string;
+  newPath: string;
+  operationId?: string;
 };
 
 export class FsVault {
@@ -117,44 +141,50 @@ export class FsVault {
 
   async read(filePath: string, options: { targetType?: string; target?: string; targetDelimiter?: string } = {}): Promise<unknown> {
     const relative = this.guard.validateVaultFilePath(filePath);
-    const absolute = await this.guard.resolveExisting(relative);
-    if (!relative.endsWith(".md")) {
-      if (options.targetType || options.target) throw new Error("targeted reads are only supported for Markdown .md files");
-      if (!isTextReadablePath(relative)) throw new Error("binary files cannot be read with vault_read");
-      const content = await readFile(absolute, "utf8");
-      const fileStat = await stat(absolute);
+    return this.locks.withLock([relative], async () => {
+      const absolute = await this.guard.resolveExisting(relative);
+      const snapshot = await readSnapshot(absolute);
+      const content = snapshot.bytes.toString("utf8");
+      if (!relative.endsWith(".md")) {
+        if (options.targetType || options.target) throw new Error("targeted reads are only supported for Markdown .md files");
+        if (!isTextReadablePath(relative)) throw new Error("binary files cannot be read with vault_read");
+        return {
+          path: relative,
+          content,
+          stat: { ctime: snapshot.ctimeMs, mtime: snapshot.mtimeMs, size: snapshot.bytes.length },
+          revision: revisionFromBytes(snapshot.bytes, snapshot.mtimeMs)
+        };
+      }
+      if ((options.targetType == null) !== (options.target == null)) throw new Error("targetType and target must be provided together");
+      if (options.targetType && options.target) return this.readTarget(content, options.targetType, options.target, options.targetDelimiter);
+      const frontmatter = parseFrontmatter(content).data;
+      const map = getDocumentMap(content);
       return {
         path: relative,
         content,
-        stat: { ctime: fileStat.ctimeMs, mtime: fileStat.mtimeMs, size: fileStat.size }
+        frontmatter,
+        tags: [...new Set([...frontmatterTags(frontmatter), ...map.tags])].sort(),
+        stat: { ctime: snapshot.ctimeMs, mtime: snapshot.mtimeMs, size: snapshot.bytes.length },
+        revision: revisionFromBytes(snapshot.bytes, snapshot.mtimeMs),
+        links: map.links,
+        embeds: map.embeds
       };
-    }
-    const content = await readFile(absolute, "utf8");
-    if ((options.targetType == null) !== (options.target == null)) throw new Error("targetType and target must be provided together");
-    if (options.targetType && options.target) return this.readTarget(content, options.targetType, options.target, options.targetDelimiter);
-    const fileStat = await stat(absolute);
-    const frontmatter = parseFrontmatter(content).data;
-    const map = getDocumentMap(content);
-    return {
-      path: relative,
-      content,
-      frontmatter,
-      tags: [...new Set([...frontmatterTags(frontmatter), ...map.tags])].sort(),
-      stat: { ctime: fileStat.ctimeMs, mtime: fileStat.mtimeMs, size: fileStat.size },
-      links: map.links,
-      embeds: map.embeds
-    };
+    });
   }
 
-  async write(filePath: string, content: string): Promise<void> {
+  async write(filePath: string, content: string, expectedSha256?: string): Promise<LocalFileMutationResult> {
     const relative = this.guard.validateFilePath(filePath, { allowMissing: true });
-    await this.locks.withLock([relative], async () => {
+    return this.locks.withLock([relative], async () => {
       try {
         await this.guard.assertWritableParent(relative);
         const absolute = this.guard.resolveCreate(relative);
+        const existing = await readFileIfExists(absolute);
+        assertExpectedRevision(relative, existing, expectedSha256, "CONTENT_CONFLICT");
         await this.backupExisting(relative, "vault_write");
         await atomicWriteFile(absolute, content);
-        await audit("vault_write", "success", { path: relative, bytes: Buffer.byteLength(content) });
+        const revision = await revisionForPath(absolute);
+        await audit("vault_write", "success", { path: relative, bytes: Buffer.byteLength(content), sha256: revision.sha256 });
+        return { path: relative, revision };
       } catch (error) {
         await audit("vault_write", "failure", { path: relative, error: errorMessage(error) });
         throw error;
@@ -162,22 +192,67 @@ export class FsVault {
     });
   }
 
-  async append(filePath: string, content: string): Promise<void> {
+  async createNote(filePath: string, content: string): Promise<LocalFileMutationResult> {
     const relative = this.guard.validateFilePath(filePath, { allowMissing: true });
-    await this.locks.withLock([relative], async () => {
+    return this.locks.withLock([relative], async () => {
+      try {
+        await this.guard.assertWritableParent(relative);
+        const absolute = this.guard.resolveCreate(relative);
+        try {
+          await atomicCreateFile(absolute, content);
+        } catch (error) {
+          if (nodeErrorCode(error) === "EEXIST") {
+            throw new ToolDomainError("ALREADY_EXISTS", `note already exists: ${relative}`, {
+              details: { path: relative },
+              cause: error
+            });
+          }
+          throw error;
+        }
+        const revision = await revisionForPath(absolute);
+        await audit("vault_create_note", "success", { path: relative, bytes: Buffer.byteLength(content), sha256: revision.sha256 });
+        return { path: relative, revision };
+      } catch (error) {
+        await audit("vault_create_note", "failure", { path: relative, error: errorMessage(error) });
+        throw error;
+      }
+    });
+  }
+
+  async replaceNote(filePath: string, content: string, expectedSha256: string): Promise<LocalFileMutationResult> {
+    const relative = this.guard.validateFilePath(filePath);
+    return this.locks.withLock([relative], async () => {
+      try {
+        const absolute = await this.guard.resolveExisting(relative);
+        const existing = await readFile(absolute);
+        assertExpectedRevision(relative, existing, expectedSha256, "CONTENT_CONFLICT");
+        await this.backupExisting(relative, "vault_replace_note");
+        await atomicWriteFile(absolute, content);
+        const revision = await revisionForPath(absolute);
+        await audit("vault_replace_note", "success", { path: relative, bytes: Buffer.byteLength(content), sha256: revision.sha256 });
+        return { path: relative, revision };
+      } catch (error) {
+        await audit("vault_replace_note", "failure", { path: relative, error: errorMessage(error) });
+        throw error;
+      }
+    });
+  }
+
+  async append(filePath: string, content: string, expectedSha256?: string): Promise<LocalFileMutationResult> {
+    const relative = this.guard.validateFilePath(filePath, { allowMissing: true });
+    return this.locks.withLock([relative], async () => {
       await this.guard.assertWritableParent(relative);
       const absolute = this.guard.resolveCreate(relative);
-      let existing = "";
-      try {
-        existing = await readFile(absolute, "utf8");
-      } catch (error: any) {
-        if (error?.code !== "ENOENT") throw error;
-      }
+      const existingBytes = await readFileIfExists(absolute);
+      assertExpectedRevision(relative, existingBytes, expectedSha256, "CONTENT_CONFLICT");
+      const existing = existingBytes?.toString("utf8") ?? "";
       const next = existing.length === 0 ? content : `${existing.endsWith("\n") ? existing : `${existing}\n`}${content}`;
       try {
         await this.backupExisting(relative, "vault_append");
         await atomicWriteFile(absolute, next);
-        await audit("vault_append", "success", { path: relative, bytes: Buffer.byteLength(content) });
+        const revision = await revisionForPath(absolute);
+        await audit("vault_append", "success", { path: relative, bytes: Buffer.byteLength(content), sha256: revision.sha256 });
+        return { path: relative, revision };
       } catch (error) {
         await audit("vault_append", "failure", { path: relative, error: errorMessage(error) });
         throw error;
@@ -251,15 +326,19 @@ export class FsVault {
     }
   }
 
-  async patch(filePath: string, args: PatchArgs): Promise<void> {
+  async patch(filePath: string, args: PatchArgs, expectedSha256?: string): Promise<LocalFileMutationResult> {
     const relative = this.guard.validateFilePath(filePath);
-    await this.locks.withLock([relative], async () => {
+    return this.locks.withLock([relative], async () => {
       try {
         const absolute = await this.guard.resolveExisting(relative);
-        const content = await readFile(absolute, "utf8");
+        const bytes = await readFile(absolute);
+        assertExpectedRevision(relative, bytes, expectedSha256, "CONTENT_CONFLICT");
+        const content = bytes.toString("utf8");
         await this.backupExisting(relative, "vault_patch");
         await atomicWriteFile(absolute, patchMarkdown(content, args));
-        await audit("vault_patch", "success", { path: relative, targetType: args.targetType, target: args.target, operation: args.operation });
+        const revision = await revisionForPath(absolute);
+        await audit("vault_patch", "success", { path: relative, targetType: args.targetType, target: args.target, operation: args.operation, sha256: revision.sha256 });
+        return { path: relative, revision };
       } catch (error) {
         await audit("vault_patch", "failure", { path: relative, targetType: args.targetType, target: args.target, operation: args.operation, error: errorMessage(error) });
         throw error;
@@ -318,72 +397,188 @@ export class FsVault {
     });
   }
 
-  async delete(filePath: string): Promise<void> {
+  async delete(filePath: string, expectedSha256?: string): Promise<DeleteMutationResult> {
     const relative = this.guard.validateVaultPath(filePath);
-    await this.locks.withLock([relative], async () => {
+    return this.locks.withLock([relative], async () => {
+      let mutation: PendingMutation | undefined;
+      let localApplied = false;
+      let readyMarked = false;
       try {
         const existing = await this.guard.resolveExistingPath(relative);
         if (existing.type === "directory") {
+          if (expectedSha256 !== undefined) {
+            throw new ToolDomainError("INVALID_ARGUMENT", "expectedSha256 is only valid when deleting a file", {
+              details: { path: relative }
+            });
+          }
           await rmdir(existing.absolute);
           await audit("vault_delete", "success", { path: relative, directory: true });
-          return;
+          return { path: relative };
         }
         const absolute = existing.absolute;
+        const current = await readFile(absolute);
+        assertExpectedRevision(relative, current, expectedSha256, "CONTENT_CONFLICT");
         await this.backupExisting(relative, "vault_delete");
         if (this.trashDelete) {
           const trashRelative = await this.allocateRecoveryPath(this.trashDir, relative, "vault_delete");
           const trashAbsolute = this.guard.resolveCreate(trashRelative);
           await mkdir(path.dirname(trashAbsolute), { recursive: true });
-          const mutation = await this.mutationJournal?.createDelete(relative);
+          mutation = await this.mutationJournal?.createDelete(relative);
           await rename(absolute, trashAbsolute);
+          localApplied = true;
           await mutation?.markReady({ trashPath: trashRelative });
-          await audit("vault_delete", "success", { path: relative, trashPath: trashRelative });
+          readyMarked = mutation !== undefined;
+          await audit("vault_delete", "success", { path: relative, trashPath: trashRelative, operationId: mutation?.id });
         } else {
-          const mutation = await this.mutationJournal?.createDelete(relative);
+          mutation = await this.mutationJournal?.createDelete(relative);
           await rm(absolute);
+          localApplied = true;
           await mutation?.markReady();
-          await audit("vault_delete", "success", { path: relative, permanent: true });
+          readyMarked = mutation !== undefined;
+          await audit("vault_delete", "success", { path: relative, permanent: true, operationId: mutation?.id });
         }
+        return mutation ? { path: relative, operationId: mutation.id } : { path: relative };
       } catch (error) {
-        await audit("vault_delete", "failure", { path: relative, error: errorMessage(error) });
-        throw error;
+        const failure = mutation
+          ? await this.walMutationFailure(mutation, error, localApplied, readyMarked)
+          : error;
+        await audit("vault_delete", "failure", { path: relative, operationId: mutation?.id, error: errorMessage(failure) });
+        throw failure;
       }
     });
   }
 
-  async move(filePath: string, destination: string, allowOverwrite = false): Promise<string> {
+  async move(
+    filePath: string,
+    destination: string,
+    allowOverwrite = false,
+    expectedSha256?: string,
+    expectedDestinationSha256?: string
+  ): Promise<MoveMutationResult> {
     const sourceRelative = this.guard.validateVaultFilePath(filePath);
     const destinationRelative = this.guard.validateVaultDestination(destination, sourceRelative);
     const sourceIsMarkdown = sourceRelative.endsWith(".md");
     if (sourceIsMarkdown !== destinationRelative.endsWith(".md")) {
       throw new Error("vault_move cannot change a file between Markdown and non-Markdown extensions");
     }
+    if (sourceRelative === destinationRelative) {
+      throw new ToolDomainError("DESTINATION_CONFLICT", "source and destination must be different", {
+        details: { path: sourceRelative, destination: destinationRelative }
+      });
+    }
     return this.locks.withLock([sourceRelative, destinationRelative], async () => {
+      let mutation: PendingMutation | undefined;
+      let localApplied = false;
+      let readyMarked = false;
       try {
         const sourceAbsolute = await this.guard.resolveExisting(sourceRelative);
+        const sourceBytes = await readFile(sourceAbsolute);
+        assertExpectedRevision(sourceRelative, sourceBytes, expectedSha256, "CONTENT_CONFLICT");
         await this.guard.assertWritableParent(destinationRelative);
         const destinationAbsolute = this.guard.resolveCreate(destinationRelative);
-        if (!allowOverwrite) {
-          try {
-            await stat(destinationAbsolute);
-            throw new Error(`destination already exists: ${destinationRelative}`);
-          } catch (error: any) {
-            if (error?.code !== "ENOENT") throw error;
-          }
+        const destinationBytes = await readFileIfExists(destinationAbsolute);
+        if (!allowOverwrite && destinationBytes !== undefined) {
+          throw new ToolDomainError("DESTINATION_CONFLICT", `destination already exists: ${destinationRelative}`, {
+            details: { destination: destinationRelative }
+          });
+        }
+        if (expectedDestinationSha256 !== undefined && destinationBytes === undefined) {
+          throw new ToolDomainError("DESTINATION_CONFLICT", `destination does not exist: ${destinationRelative}`, {
+            details: { destination: destinationRelative, expectedSha256: expectedDestinationSha256, actualSha256: null }
+          });
+        }
+        if (destinationBytes !== undefined) {
+          assertExpectedRevision(destinationRelative, destinationBytes, expectedDestinationSha256, "DESTINATION_CONFLICT");
         }
         await this.backupExisting(sourceRelative, "vault_move");
-        if (allowOverwrite) await this.backupExisting(destinationRelative, "vault_move_overwrite");
-        const mutation = await this.mutationJournal?.createMove(sourceRelative, destinationRelative, allowOverwrite);
-        if (allowOverwrite) await rm(destinationAbsolute, { force: true });
+        if (allowOverwrite && destinationBytes !== undefined) await this.backupExisting(destinationRelative, "vault_move_overwrite");
+        mutation = await this.mutationJournal?.createMove(sourceRelative, destinationRelative, allowOverwrite);
         await rename(sourceAbsolute, destinationAbsolute);
+        localApplied = true;
+        await fsyncRenameParents(sourceAbsolute, destinationAbsolute);
         await mutation?.markReady();
-        await audit("vault_move", "success", { path: sourceRelative, destination: destinationRelative, allowOverwrite });
-        return destinationRelative;
+        readyMarked = mutation !== undefined;
+        await audit("vault_move", "success", { path: sourceRelative, destination: destinationRelative, allowOverwrite, operationId: mutation?.id });
+        return mutation
+          ? { oldPath: sourceRelative, newPath: destinationRelative, operationId: mutation.id }
+          : { oldPath: sourceRelative, newPath: destinationRelative };
       } catch (error) {
-        await audit("vault_move", "failure", { path: sourceRelative, destination: destinationRelative, allowOverwrite, error: errorMessage(error) });
-        throw error;
+        const failure = mutation
+          ? await this.walMutationFailure(mutation, error, localApplied, readyMarked)
+          : error;
+        await audit("vault_move", "failure", { path: sourceRelative, destination: destinationRelative, allowOverwrite, operationId: mutation?.id, error: errorMessage(failure) });
+        throw failure;
       }
     });
+  }
+
+  private async walMutationFailure(
+    mutation: PendingMutation,
+    error: unknown,
+    localApplied: boolean,
+    readyMarked: boolean
+  ): Promise<ToolDomainError> {
+    const message = errorMessage(error);
+    if (readyMarked) {
+      return new ToolDomainError("INTERNAL_ERROR", message, {
+        cause: error,
+        details: { operationId: mutation.id },
+        result: {
+          executionMode: "wal",
+          operationId: mutation.id,
+          status: "queued",
+          outcome: "applied",
+          commitLevel: "local"
+        }
+      });
+    }
+    if (!localApplied) {
+      try {
+        await mutation.cancel(message);
+        return new ToolDomainError("INTERNAL_ERROR", message, {
+          cause: error,
+          details: { operationId: mutation.id },
+          result: {
+            executionMode: "wal",
+            operationId: mutation.id,
+            status: "cancelled",
+            commitLevel: "none"
+          }
+        });
+      } catch (cancelError) {
+        return new ToolDomainError("INTERNAL_ERROR", "The local operation failed and its WAL record could not be cancelled.", {
+          cause: error,
+          details: { operationId: mutation.id, originalError: message, cancelError: errorMessage(cancelError) },
+          result: {
+            executionMode: "wal",
+            operationId: mutation.id,
+            status: "processing",
+            commitLevel: "unknown",
+            stateUncertain: true
+          }
+        });
+      }
+    }
+    return new ToolDomainError("INTERNAL_ERROR", "The local operation may have completed, but its WAL state could not be finalized.", {
+      cause: error,
+      details: { operationId: mutation.id, originalError: message },
+      result: {
+        executionMode: "wal",
+        operationId: mutation.id,
+        status: "processing",
+        commitLevel: "unknown",
+        stateUncertain: true
+      }
+    });
+  }
+
+  async getOperation(operationId: string): Promise<OperationStatus> {
+    if (!this.mutationJournal) {
+      throw new ToolDomainError("PATH_NOT_FOUND", "operation journal is not configured", {
+        details: { operationId }
+      });
+    }
+    return this.mutationJournal.getOperation(operationId);
   }
 
   async documentMap(filePath: string): Promise<unknown> {
@@ -601,6 +796,76 @@ export class FsVault {
       }
     }
   }
+}
+
+async function readSnapshot(filePath: string): Promise<{ bytes: Buffer; ctimeMs: number; mtimeMs: number }> {
+  const handle = await open(filePath, "r");
+  try {
+    const bytes = await handle.readFile();
+    const fileStat = await handle.stat();
+    return { bytes, ctimeMs: fileStat.ctimeMs, mtimeMs: fileStat.mtimeMs };
+  } finally {
+    await handle.close();
+  }
+}
+
+async function readFileIfExists(filePath: string): Promise<Buffer | undefined> {
+  try {
+    return await readFile(filePath);
+  } catch (error) {
+    if (nodeErrorCode(error) === "ENOENT") return undefined;
+    throw error;
+  }
+}
+
+async function revisionForPath(filePath: string): Promise<FileRevision> {
+  const snapshot = await readSnapshot(filePath);
+  return revisionFromBytes(snapshot.bytes, snapshot.mtimeMs);
+}
+
+function revisionFromBytes(bytes: Uint8Array, mtimeMs: number): FileRevision {
+  return {
+    sha256: sha256(bytes),
+    size: bytes.byteLength,
+    mtimeMs
+  };
+}
+
+function sha256(bytes: Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+function assertExpectedRevision(
+  relative: string,
+  currentBytes: Uint8Array | undefined,
+  expectedSha256: string | undefined,
+  code: "CONTENT_CONFLICT" | "DESTINATION_CONFLICT"
+): void {
+  if (expectedSha256 === undefined) return;
+  const actualSha256 = currentBytes === undefined ? null : sha256(currentBytes);
+  if (actualSha256 !== expectedSha256.toLowerCase()) {
+    throw new ToolDomainError(code, `file revision does not match: ${relative}`, {
+      details: { path: relative, expectedSha256: expectedSha256.toLowerCase(), actualSha256 }
+    });
+  }
+}
+
+async function fsyncRenameParents(sourcePath: string, destinationPath: string): Promise<void> {
+  const directories = [...new Set([path.dirname(sourcePath), path.dirname(destinationPath)])];
+  for (const directory of directories) {
+    const handle = await open(directory, "r");
+    try {
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+  }
+}
+
+function nodeErrorCode(error: unknown): string | undefined {
+  if (!error || typeof error !== "object") return undefined;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "string" ? code : undefined;
 }
 
 function sanitizeDirName(name: string): string {

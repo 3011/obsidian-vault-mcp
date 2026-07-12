@@ -217,6 +217,8 @@ async function testToolDiscovery(port: number): Promise<void> {
     "vault_list_detailed",
     "vault_read",
     "vault_write",
+    "vault_create_note",
+    "vault_replace_note",
     "vault_append",
     "vault_patch",
     "vault_delete",
@@ -433,11 +435,11 @@ async function testDirectoryPolicy(port: number): Promise<void> {
     reason: "This should be created one level at a time."
   }, /single path segment|one level at a time/i);
 
-  await expectToolError(port, "vault_create_directory", {
+  await expectInvalidArguments(port, "vault_create_directory", {
     parent: "Projects",
     name: "x".repeat(201),
     reason: "The directory name exceeds the server-side limit."
-  }, /must not exceed 200 characters/i);
+  }, /must NOT have more than 200 characters|maxLength/i);
 
   await expectToolError(port, "vault_create_directory", {
     parent: "Projects",
@@ -717,7 +719,7 @@ async function testReadOnlyMode(): Promise<void> {
     assert(!names.includes("vault_create_note_with_assets"));
     assert(!names.includes("vault_create_external_reference_note"));
     const response = await rpc(readOnlyPort, { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "vault_write", arguments: { path: "98-Inbox/nope.md", content: "nope" } } });
-    assert.equal(response.error?.code, -32601);
+    assert.equal(response.error?.code, -32602);
   } finally {
     readOnlyChild.kill("SIGTERM");
   }
@@ -763,6 +765,13 @@ async function expectToolError(port: number, name: string, args: Record<string, 
   const response = await rpc(port, { jsonrpc: "2.0", id: Math.random(), method: "tools/call", params: { name, arguments: args } });
   assert.equal(response.result.isError, true, JSON.stringify(response));
   assert.match(response.result.content[0].text, pattern);
+}
+
+async function expectInvalidArguments(port: number, name: string, args: Record<string, unknown>, pattern: RegExp): Promise<void> {
+  const response = await rpc(port, { jsonrpc: "2.0", id: Math.random(), method: "tools/call", params: { name, arguments: args } });
+  assert.equal(response.error?.code, -32602, JSON.stringify(response));
+  assert.equal(response.error?.data?.errorCode, "INVALID_ARGUMENT", JSON.stringify(response));
+  assert.match(JSON.stringify(response.error?.data?.issues ?? []), pattern);
 }
 
 function unwrapStructuredContent(value: any): any {

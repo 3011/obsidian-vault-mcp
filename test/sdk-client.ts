@@ -42,8 +42,14 @@ try {
   const toolNames = tools.tools.map((tool) => tool.name);
   assert(toolNames.includes("vault_read"));
   assert(toolNames.includes("vault_write"));
+  assert(toolNames.includes("vault_create_note"));
+  assert(toolNames.includes("vault_replace_note"));
   assert(toolNames.includes("vault_delete"));
   assert(toolNames.includes("search_simple"));
+  for (const name of ["vault_write", "vault_create_note", "vault_replace_note", "vault_delete", "vault_move", "vault_get_operation"]) {
+    const tool = tools.tools.find((item) => item.name === name);
+    assert(tool?.outputSchema && tool.outputSchema.type === "object", `missing object outputSchema for ${name}`);
+  }
 
   const readResult = await client.callTool({
     name: "vault_read",
@@ -57,6 +63,11 @@ try {
     arguments: { path: "98-Inbox/sdk-write.md", content: "# SDK Write\n\nneedle sdk\n" }
   });
   assert.equal(writeResult.isError, false);
+  const writeStructured = writeResult.structuredContent as Record<string, any> | undefined;
+  assert.equal(writeStructured?.ok, true);
+  assert.equal(writeStructured?.executionMode, "synchronous");
+  assert.equal(writeStructured?.status, "succeeded");
+  assert.match(String(writeStructured?.revision?.sha256), /^[0-9a-f]{64}$/);
 
   const searchResult = await client.callTool({
     name: "search_simple",

@@ -1,3 +1,5 @@
+import type { NormalizedToolFailure } from "./errors.js";
+
 export type JsonRpcRequest = {
   jsonrpc: "2.0";
   id?: string | number | null;
@@ -10,6 +12,7 @@ export type Tool = {
   title: string;
   description: string;
   inputSchema: Record<string, unknown>;
+  outputSchema?: Record<string, unknown>;
   handler: (args: Record<string, unknown>) => Promise<unknown>;
 };
 
@@ -17,8 +20,15 @@ export function rpcResult(id: JsonRpcRequest["id"], result: unknown): Record<str
   return { jsonrpc: "2.0", id, result };
 }
 
-export function rpcError(id: JsonRpcRequest["id"], code: number, message: string): Record<string, unknown> {
-  return { jsonrpc: "2.0", id, error: { code, message } };
+export function rpcError(
+  id: JsonRpcRequest["id"],
+  code: number,
+  message: string,
+  data?: Record<string, unknown>
+): Record<string, unknown> {
+  const error: Record<string, unknown> = { code, message };
+  if (data !== undefined) error.data = data;
+  return { jsonrpc: "2.0", id, error };
 }
 
 export function toolResult(data: unknown): Record<string, unknown> {
@@ -30,10 +40,10 @@ export function toolResult(data: unknown): Record<string, unknown> {
   };
 }
 
-export function toolError(message: string): Record<string, unknown> {
+export function toolError(failure: NormalizedToolFailure): Record<string, unknown> {
   return {
-    content: [{ type: "text", text: message }],
-    structuredContent: { error: message },
+    content: [{ type: "text", text: failure.error.message }],
+    structuredContent: { ok: false, ...(failure.result ?? {}), error: failure.error },
     isError: true
   };
 }

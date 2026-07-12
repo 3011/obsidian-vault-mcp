@@ -17,11 +17,14 @@ It does not depend on Obsidian, plugin APIs, command palette, active files, or G
 - `vault_list`: list vault files and folders.
 - `vault_list_detailed`: return structured path facts, file metadata, attachment markers, warnings, and scan IDs.
 - `vault_read`: read full note metadata/content or a heading, block, or frontmatter target; read supported text files.
-- `vault_write`: create or overwrite a Markdown file.
+- `vault_write`: deprecated compatibility upsert tool.
+- `vault_create_note`: atomically create a new Markdown note without overwriting.
+- `vault_replace_note`: replace an existing note only when its raw-byte SHA-256 matches.
 - `vault_append`: append content to a Markdown file, creating it if missing.
 - `vault_patch`: patch heading, block, or frontmatter targets.
 - `vault_delete`: delete a vault file or empty folder.
 - `vault_move`: move or rename a vault file.
+- `vault_get_operation`: query a WAL-backed move/delete operation.
 - `vault_get_document_map`: list headings, block refs, frontmatter fields, links, embeds, and tags.
 - `search_simple`: full-vault substring search with context.
 - `search_query`: structured Markdown search by path glob, tag, frontmatter equality, and content substring.
@@ -37,16 +40,16 @@ Destructive tools are intentionally exposed because the operator accepts that ri
 
 ## Implementation Notes
 
-- `vault_read` returns content, parsed frontmatter, tags, file stat, links, and embeds for Markdown files. It can also read a heading, nested heading path, block reference, or frontmatter field. For non-Markdown text files, it returns content and stat; binary files are rejected.
+- Full-file `vault_read` returns content, metadata, and a `revision`. `revision.sha256` is calculated from the exact on-disk bytes without Markdown, newline, Unicode, or encoding normalization. Targeted reads keep returning the selected target value.
 - `vault_list_detailed` distinguishes missing paths, files, empty directories, non-empty directories, denied paths, and skipped entries. It can recurse and optionally compute SHA-256 hashes.
 - `find_asset_references` supports Obsidian wikilinks, Markdown image links, and common HTML `<img src>` references. It ignores fenced code blocks and inline code. It reports `scanCompleteness`, `candidateOrphan`, `trashSafety`, evidence, and warnings.
 - `asset_audit` is read-only and does not move, delete, or rewrite files. It combines `vault_list_detailed` and `find_asset_references`; `candidateOrphan=true` means no supported structured reference was found, while `trashSafety=safe` is only returned for full-vault scans with no references, ambiguity, unresolved matches, unsupported matches, duplicates, or relevant warnings. Uncertain cases return `trashSafety=unknown`.
-- `vault_write` atomically creates or overwrites Markdown files.
-- `vault_append` creates missing Markdown files and preserves existing content.
+- `vault_write` keeps the legacy upsert behavior. New callers should use `vault_create_note` or `vault_replace_note`; create-only commits use a same-directory temporary file and a hard-link no-replace operation.
+- `vault_append` creates missing Markdown files and preserves existing content; optional `expectedSha256` detects concurrent changes.
 - `vault_patch` supports heading, block, and frontmatter targets with `replace`, `prepend`, and `append`; it also supports `createTargetIfMissing`, `rejectIfContentPreexists`, `trimTargetWhitespace`, `targetDelimiter`, `contentType`, and `targetScope`.
 - Duplicate heading paths currently follow `markdown-patch` map behavior: the later matching heading wins. Prefer unique heading paths when using `vault_patch` or pass a more specific nested path.
-- `vault_delete` deletes vault files and empty directories. Non-empty directories are rejected.
-- `vault_move` supports destination directories ending in `/` and optional overwrite for vault files. It does not allow renaming between Markdown and non-Markdown extensions.
+- `vault_delete` deletes vault files and empty directories. WAL-backed file deletes return an `operationId`; empty-directory deletes and deployments without WAL finish synchronously without a temporary ID.
+- `vault_move` supports destination directories ending in `/` and optional overwrite. Overwrite uses one atomic rename without deleting the destination first. WAL-backed moves return an `operationId` queryable through `vault_get_operation`.
 - `vault_upload_image_asset` accepts PNG, JPEG, WebP, and GIF only; it verifies MIME, extension, size, basic magic bytes, and requires the target directory to be named `assets`.
 - `vault_upload_image_asset` and `vault_create_note_with_assets` accept optional `expectedSha256`, `expectedSize`, and `preserveOriginal` fields. Use them when the caller needs to prove original byte preservation.
 - `vault_create_note_with_assets` stores images under a note-local `assets/` directory and replaces `{{asset:n}}` placeholders with embeds.
@@ -54,6 +57,14 @@ Destructive tools are intentionally exposed because the operator accepts that ri
 - `search_simple` returns all matches per file with filename/content source and context.
 - `search_query` searches Markdown files with path glob, tag, frontmatter equality, and content substring filters.
 - `tag_list` scans frontmatter tags and inline tags, including parent counts for nested tags.
+
+### Interface reliability contract
+
+- Unknown tool names and inputSchema failures return JSON-RPC `-32602`; domain failures after execution starts return `isError=true` with a structured `error`.
+- `expectedSha256` is checked against raw bytes while holding the same path lock used for the mutation, and the new revision is generated before releasing that lock. The current lock is process-local, so production keeps one MCP replica.
+- WAL commit level is derived only from facts: `remoteVerifiedAt` means remote, `localCommittedAt` means local, cancelled with neither means none, and every other missing-timestamp state means unknown.
+- `remote` means the Controller completed LiveSync synchronization and post-sync `livesync-cli info` checks; it does not claim direct CouchDB revision verification.
+- `OPERATION_NOT_FOUND` may also mean the record exceeded retention or WAL storage is unavailable.
 
 ## Image Integrity
 
@@ -149,7 +160,7 @@ npm test
 
 The test suite starts the HTTP MCP server and covers all exposed tools, authentication failure, path traversal rejection, sensitive directory rejection, symlink escape rejection, missing-parent rejection without directory creation, root-write rejection, write-root allowlists, overwrite move behavior, patch variants, image asset validation, external reference note creation, search multi-match behavior, and tag aggregation.
 
-It also runs an official `@modelcontextprotocol/sdk` Streamable HTTP client compatibility test that connects to `/mcp`, lists tools, and calls `vault_read`, `vault_write`, and `search_simple`.
+It also runs an official `@modelcontextprotocol/sdk` Streamable HTTP client compatibility test that verifies published `outputSchema`, structured success output, and calls including `vault_read`, `vault_write`, and `search_simple`.
 
 Additional split tests cover per-file concurrent append locking and Markdown/YAML boundary cases including complex frontmatter, Unicode headings, fenced code blocks, duplicate heading behavior, CRLF input, and table patching via `markdown-patch`.
 

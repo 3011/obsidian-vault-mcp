@@ -103,14 +103,23 @@ async function processMutation(file) {
   await fsyncDir(path.dirname(processingPath));
 
   try {
-    if (record.op === "delete") await applyDelete(record);
-    else if (record.op === "move") await applyMove(record);
+    let remoteVerification;
+    if (record.op === "delete") remoteVerification = await applyDelete(record);
+    else if (record.op === "move") remoteVerification = await applyMove(record);
     else throw new Error(`unsupported mutation op: ${record.op}`);
 
-    const doneDir = path.join(config.mutations, "done", new Date().toISOString().slice(0, 10));
+    const completedAt = new Date().toISOString();
+    const doneDir = path.join(config.mutations, "done", completedAt.slice(0, 10));
     await mkdir(doneDir, { recursive: true });
     const donePath = path.join(doneDir, path.basename(processingPath));
-    await writeJson(processingPath, { ...record, state: "done", updatedAt: new Date().toISOString() });
+    await writeJson(processingPath, {
+      ...record,
+      schemaVersion: 2,
+      state: "done",
+      remoteVerifiedAt: completedAt,
+      remoteVerification,
+      updatedAt: completedAt
+    });
     await rename(processingPath, donePath);
     await fsyncDir(path.dirname(processingPath));
     await fsyncDir(doneDir);
@@ -125,6 +134,11 @@ async function applyDelete(record) {
   await runRmIdempotent(notePath);
   await runCli("sync");
   await assertNotActive(notePath);
+  return {
+    method: "livesync-cli-post-sync-info",
+    path: notePath,
+    pathState: "not-active"
+  };
 }
 
 async function applyMove(record) {
@@ -143,6 +157,13 @@ async function applyMove(record) {
   await assertNotActive(oldPath);
   if (newExists) await assertActive(newPath);
   else await assertNotActive(newPath);
+  return {
+    method: "livesync-cli-post-sync-info",
+    oldPath,
+    oldPathState: "not-active",
+    newPath,
+    newPathState: newExists ? "active" : "not-active"
+  };
 }
 
 async function recoverPending() {
@@ -159,7 +180,11 @@ async function recoverPending() {
           await transitionMutation(file, record, "cancelled", { recoveryReason: "pending delete source still exists; filesystem mutation did not complete" });
           console.log(JSON.stringify({ level: "warn", message: "cancelled stale pending delete", id: record.id, path: notePath }));
         } else {
-          await transitionMutation(file, record, "ready", { recoveryReason: "pending delete source is absent; recovering completed filesystem mutation" });
+          await transitionMutation(file, record, "ready", {
+            schemaVersion: 2,
+            localCommittedAt: record.localCommittedAt || new Date().toISOString(),
+            recoveryReason: "pending delete source is absent; recovering completed filesystem mutation"
+          });
           console.log(JSON.stringify({ level: "warn", message: "recovered stale pending delete", id: record.id, path: notePath }));
         }
         continue;
@@ -172,6 +197,8 @@ async function recoverPending() {
         const newExists = await exists(path.join(config.vault, newPath));
         if (!oldExists) {
           await transitionMutation(file, record, "ready", {
+            schemaVersion: 2,
+            localCommittedAt: record.localCommittedAt || new Date().toISOString(),
             recoveryReason: newExists
               ? "pending move source is absent and destination exists; recovering completed filesystem mutation"
               : "pending move source and destination are absent; recovering final deleted state"
@@ -330,17 +357,23 @@ async function shutdown(signal) {
 
 async function failMutation(processingPath, record, error) {
   const failedPath = statePath("failed", path.basename(processingPath));
+  const message = error instanceof Error ? error.message : String(error);
   const failed = {
     ...record,
+    schemaVersion: 2,
     state: "failed",
     updatedAt: new Date().toISOString(),
-    error: error instanceof Error ? error.message : String(error)
+    error: {
+      code: "INTERNAL_ERROR",
+      message,
+      retryable: true
+    }
   };
   await writeJson(processingPath, failed);
   await rename(processingPath, failedPath);
   await fsyncDir(path.dirname(processingPath));
   await fsyncDir(path.dirname(failedPath));
-  console.error(JSON.stringify({ level: "error", message: "mutation failed", id: record.id, op: record.op, error: failed.error }));
+  console.error(JSON.stringify({ level: "error", message: "mutation failed", id: record.id, op: record.op, error: failed.error.message }));
 }
 
 async function ensureLayout() {

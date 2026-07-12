@@ -1,10 +1,43 @@
-import { open, rename, rm } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { link, open, rename, rm } from "node:fs/promises";
 import path from "node:path";
 
 export async function atomicWriteFile(targetPath: string, content: string | Uint8Array): Promise<void> {
   const dir = path.dirname(targetPath);
-  const tempPath = path.join(dir, `.${path.basename(targetPath)}.${process.pid}.${Date.now()}.tmp`);
-  const file = await open(tempPath, "w", 0o600);
+  const tempPath = tempFilePath(targetPath);
+  try {
+    await writeAndSync(tempPath, content);
+    await rename(tempPath, targetPath);
+    await fsyncDir(dir);
+  } catch (error) {
+    await rm(tempPath, { force: true }).catch(() => undefined);
+    throw error;
+  }
+}
+
+export async function atomicCreateFile(targetPath: string, content: string | Uint8Array): Promise<void> {
+  const dir = path.dirname(targetPath);
+  const tempPath = tempFilePath(targetPath);
+  let linked = false;
+  try {
+    await writeAndSync(tempPath, content);
+    await link(tempPath, targetPath);
+    linked = true;
+    await rm(tempPath, { force: true }).catch(() => undefined);
+    await fsyncDir(dir);
+  } catch (error) {
+    await rm(tempPath, { force: true }).catch(() => undefined);
+    if (linked) {
+      // The no-replace link is already committed. A cleanup/fsync error must not
+      // be reported as if the target were absent or safe to retry blindly.
+      await fsyncDir(dir).catch(() => undefined);
+    }
+    throw error;
+  }
+}
+
+async function writeAndSync(filePath: string, content: string | Uint8Array): Promise<void> {
+  const file = await open(filePath, "wx", 0o600);
   try {
     if (typeof content === "string") await file.writeFile(content, "utf8");
     else await file.writeFile(content);
@@ -12,16 +45,17 @@ export async function atomicWriteFile(targetPath: string, content: string | Uint
   } finally {
     await file.close();
   }
+}
+
+async function fsyncDir(dir: string): Promise<void> {
+  const dirHandle = await open(dir, "r");
   try {
-    await rename(tempPath, targetPath);
-    const dirHandle = await open(dir, "r");
-    try {
-      await dirHandle.sync();
-    } finally {
-      await dirHandle.close();
-    }
-  } catch (error) {
-    await rm(tempPath, { force: true });
-    throw error;
+    await dirHandle.sync();
+  } finally {
+    await dirHandle.close();
   }
+}
+
+function tempFilePath(targetPath: string): string {
+  return path.join(path.dirname(targetPath), `.${path.basename(targetPath)}.${process.pid}.${randomUUID()}.tmp`);
 }

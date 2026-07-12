@@ -17,11 +17,14 @@ livesync-cli daemon -> /data/vault -> obsidian-vault-mcp -> ChatGPT Connector
 - `vault_list`：列出 vault 文件和目录。
 - `vault_list_detailed`：返回结构化路径事实、文件元数据、附件标记、warnings 和 scan ID。
 - `vault_read`：读取完整笔记元数据/内容，或读取 heading、block、frontmatter 目标；也可读取支持的文本文件。
-- `vault_write`：创建或覆盖 Markdown 文件。
+- `vault_write`：兼容旧调用的 upsert 接口，已标记 deprecated。
+- `vault_create_note`：原子创建新 Markdown 笔记，目标存在时拒绝覆盖。
+- `vault_replace_note`：仅在原始字节 SHA-256 匹配时替换已有笔记。
 - `vault_append`：追加 Markdown 内容，文件不存在时自动创建。
 - `vault_patch`：patch heading、block 或 frontmatter 目标。
 - `vault_delete`：删除 vault 文件或空目录。
 - `vault_move`：移动或重命名 vault 文件。
+- `vault_get_operation`：查询配置 WAL 后返回的 move/delete operation。
 - `vault_get_document_map`：列出 headings、block refs、frontmatter fields、links、embeds 和 tags。
 - `search_simple`：全 vault 简单字符串搜索，返回上下文。
 - `search_query`：按 path glob、tag、frontmatter 等值和内容子串搜索 Markdown。
@@ -37,16 +40,16 @@ livesync-cli daemon -> /data/vault -> obsidian-vault-mcp -> ChatGPT Connector
 
 ## 实现说明
 
-- `vault_read` 对 Markdown 文件返回内容、frontmatter、tags、文件 stat、links 和 embeds，也可以读取 heading、nested heading path、block reference 或 frontmatter field。对非 Markdown 文本文件返回 content 和 stat；二进制文件会被拒绝。
+- `vault_read` 对完整文件读取返回内容、frontmatter、tags、文件 stat、links、embeds 和 `revision`。`revision.sha256` 直接对磁盘原始字节计算，不进行 Markdown、换行符或 Unicode 规范化。targeted read 保持原有目标值返回。
 - `vault_list_detailed` 会区分路径不存在、文件、空目录、非空目录、被拒绝路径和被跳过条目。它支持递归，并可选计算 SHA-256。
 - `find_asset_references` 支持 Obsidian wikilink、Markdown image link 和常见 HTML `<img src>` 引用。它会忽略 fenced code block 和 inline code，并返回 `scanCompleteness`、`candidateOrphan`、`trashSafety`、证据和 warnings。
 - `asset_audit` 是只读工具，不会移动、删除或改写文件。它组合 `vault_list_detailed` 和 `find_asset_references`；`candidateOrphan=true` 只表示没有发现支持范围内的结构化引用，而 `trashSafety=safe` 只会在 full-vault 扫描且无引用、无歧义、无 unresolved/unsupported match、无同名重复、无相关 warning 时返回。不确定场景返回 `trashSafety=unknown`。
-- `vault_write` 使用原子写入创建或覆盖 Markdown 文件。
-- `vault_append` 会保留已有内容，文件不存在时创建文件。
+- `vault_write` 保留旧 upsert 行为；新调用优先使用 `vault_create_note` 或 `vault_replace_note`。`vault_create_note` 使用同目录临时文件和 hard-link no-replace 提交，避免并发创建覆盖。
+- `vault_append` 会保留已有内容，文件不存在时创建文件；`expectedSha256` 可用于检测并发修改。
 - `vault_patch` 支持 heading、block、frontmatter 目标，操作包括 `replace`、`prepend`、`append`；也支持 `createTargetIfMissing`、`rejectIfContentPreexists`、`trimTargetWhitespace`、`targetDelimiter`、`contentType` 和 `targetScope`。
 - duplicate heading path 当前遵循 `markdown-patch` 的 map 行为：后匹配的 heading 会胜出。使用 `vault_patch` 时建议保持 heading path 唯一，或传入更具体的 nested path。
-- `vault_delete` 支持删除 vault 文件和空目录，非空目录会被拒绝。
-- `vault_move` 支持 vault 文件移动，destination 以 `/` 结尾表示目标目录，并支持可选 overwrite。它不允许在 Markdown 和非 Markdown 扩展之间互相改名。
+- `vault_delete` 支持删除 vault 文件和空目录，非空目录会被拒绝。配置 WAL 的文件删除返回 `operationId`；空目录删除或未配置 WAL 时同步完成且不生成临时 ID。
+- `vault_move` 支持 vault 文件移动，destination 以 `/` 结尾表示目标目录，并支持可选 overwrite。overwrite 直接使用原子 rename，不再预先删除目标。配置 WAL 时返回 `operationId`，可用 `vault_get_operation` 查询。
 - `vault_upload_image_asset` 只接受 PNG、JPEG、WebP、GIF，会校验 MIME、扩展名、大小、基础 magic bytes，并要求目标目录名为 `assets`。
 - `vault_upload_image_asset` 和 `vault_create_note_with_assets` 支持可选 `expectedSha256`、`expectedSize`、`preserveOriginal` 字段。需要证明原始字节无损保存时建议使用这些字段。
 - `vault_create_note_with_assets` 把图片保存到 note-local `assets/` 目录，并把 `{{asset:n}}` 占位符替换为 Obsidian embed。
@@ -54,6 +57,14 @@ livesync-cli daemon -> /data/vault -> obsidian-vault-mcp -> ChatGPT Connector
 - `search_simple` 按文件返回所有匹配和上下文。
 - `search_query` 按 path glob、tag、frontmatter 等值和内容子串过滤 Markdown 文件。
 - `tag_list` 扫描 frontmatter tags 和 inline tags，并统计 nested tag 的父级。
+
+### 接口可靠性契约
+
+- `tools/call` 的未知工具名和 inputSchema 校验失败统一返回 JSON-RPC `-32602`；工具开始执行后的领域错误返回 `isError=true` 和结构化 `error`。
+- 修改已有文件时，`expectedSha256` 在同一路径锁内基于原始字节校验，并在实际修改后生成新 revision。当前锁为单 Node 进程锁，生产保持 MCP 单副本。
+- WAL operation 的提交层级仅由事实字段判断：`remoteVerifiedAt` 表示 remote，`localCommittedAt` 表示 local；两者均不存在且 cancelled 表示 none，其他情况表示 unknown。
+- `remote` 表示 Controller 完成 LiveSync 同步并通过同步后的 `livesync-cli info` 状态检查，不表示直接读取 CouchDB revision。
+- `OPERATION_NOT_FOUND` 也可能表示记录已经超过保留期限或 WAL 存储不可用。
 
 ## 图片完整性
 
@@ -149,7 +160,7 @@ npm test
 
 测试套件会启动 HTTP MCP Server，并覆盖所有暴露工具、认证失败、路径穿越拒绝、敏感目录拒绝、symlink escape 拒绝、缺失父目录时拒绝且不创建目录、Vault 根目录写入拒绝、一级写入白名单、overwrite move、patch variants、图片资产校验、外部引用笔记创建、search 多匹配、tag 聚合。
 
-还包含官方 `@modelcontextprotocol/sdk` Streamable HTTP client 兼容测试，会连接 `/mcp`、列出工具，并调用 `vault_read`、`vault_write`、`search_simple`。
+还包含官方 `@modelcontextprotocol/sdk` Streamable HTTP client 兼容测试，会验证 `outputSchema`、结构化成功输出，以及 `vault_read`、`vault_write`、`search_simple` 等调用。
 
 额外拆分测试覆盖 per-file 并发 append lock，以及 Markdown/YAML 边界：复杂 frontmatter、Unicode headings、fenced code blocks 内 heading、duplicate heading、CRLF 输入、通过 `markdown-patch` patch 表格。
 

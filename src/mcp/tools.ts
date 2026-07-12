@@ -3,7 +3,82 @@ import { FsVault } from "../vault/FsVault.js";
 import type { Tool } from "./types.js";
 
 const mdPath = { type: "string", description: "Vault-relative Markdown note path ending in .md. The parent directory must already exist; writes to the vault root, absolute paths, and traversal are rejected." };
-const vaultPath = { type: "string", description: "Vault-relative file path. Absolute paths and traversal are rejected." };
+const vaultPath = { type: "string", minLength: 1, description: "Vault-relative file path. Absolute paths and traversal are rejected." };
+const fileSha256 = { type: "string", pattern: "^[0-9a-fA-F]{64}$", description: "SHA-256 of the file raw bytes returned by vault_read revision.sha256. No Markdown or newline normalization is applied." };
+const operationIdSchema = { type: "string", pattern: "^[0-9]{8}T[0-9]{9}Z-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", description: "Persistent WAL operation ID returned by a file move or delete." };
+
+
+const revisionOutputSchema = {
+  type: "object",
+  properties: {
+    sha256: { type: "string", pattern: "^[0-9a-f]{64}$" },
+    size: { type: "integer", minimum: 0 },
+    mtimeMs: { type: "number", minimum: 0 }
+  },
+  required: ["sha256", "size", "mtimeMs"],
+  additionalProperties: false
+};
+
+const localFileMutationOutputSchema = {
+  type: "object",
+  properties: {
+    ok: { const: true },
+    executionMode: { const: "synchronous" },
+    status: { const: "succeeded" },
+    outcome: { const: "applied" },
+    commitLevel: { const: "local" },
+    path: { type: "string" },
+    revision: revisionOutputSchema
+  },
+  required: ["ok", "executionMode", "status", "outcome", "commitLevel", "path", "revision"],
+  additionalProperties: false
+};
+
+const deleteMutationOutputSchema = mutationOutputSchema(
+  { path: { type: "string" } },
+  ["path"]
+);
+
+const moveMutationOutputSchema = mutationOutputSchema(
+  { oldPath: { type: "string" }, newPath: { type: "string" } },
+  ["oldPath", "newPath"]
+);
+
+const operationStatusOutputSchema = {
+  type: "object",
+  properties: {
+    ok: { const: true },
+    executionMode: { const: "wal" },
+    operationId: operationIdSchema,
+    operation: { type: "string", enum: ["delete", "move"] },
+    status: { type: "string", enum: ["queued", "processing", "succeeded", "failed", "cancelled"] },
+    outcome: { const: "applied" },
+    commitLevel: { type: "string", enum: ["none", "local", "remote", "unknown"] },
+    stateUncertain: { const: true },
+    path: { type: "string" },
+    oldPath: { type: "string" },
+    newPath: { type: "string" },
+    trashPath: { type: "string" },
+    createdAt: { type: "string" },
+    updatedAt: { type: "string" },
+    localCommittedAt: { type: "string" },
+    remoteVerifiedAt: { type: "string" },
+    remoteVerification: { type: "object", additionalProperties: true },
+    attempt: { type: "integer", minimum: 0 },
+    error: {
+      type: "object",
+      properties: {
+        code: { type: "string" },
+        message: { type: "string" },
+        retryable: { type: "boolean" }
+      },
+      required: ["code", "message", "retryable"],
+      additionalProperties: false
+    }
+  },
+  required: ["ok", "executionMode", "operationId", "operation", "status", "commitLevel", "createdAt", "updatedAt", "attempt"],
+  additionalProperties: false
+};
 
 export function buildTools(vault: FsVault): Tool[] {
   const imageIntegrityRequired = config.imageAssetIntegrityMode === "required";
@@ -33,7 +108,7 @@ export function buildTools(vault: FsVault): Tool[] {
         properties: { path: { type: "string", description: "Vault-relative directory path to list. Omit or pass an empty string for the vault root." } },
         additionalProperties: false
       },
-      handler: async (args) => ({ files: await vault.list(String(args.path ?? "")) })
+      handler: async (args) => ({ files: await vault.list((args.path as string | undefined) ?? "") })
     },
     {
       name: "vault_list_detailed",
@@ -76,38 +151,87 @@ export function buildTools(vault: FsVault): Tool[] {
         if (typeof args.targetType === "string") options.targetType = args.targetType;
         if (typeof args.target === "string") options.target = args.target;
         if (typeof args.targetDelimiter === "string") options.targetDelimiter = args.targetDelimiter;
-        return vault.read(String(args.path), options);
+        return vault.read(args.path as string, options);
       }
     },
     {
       name: "vault_write",
       title: "Vault Write",
-      description: "Create or overwrite a Markdown note inside an existing directory. Before writing, inspect the current directory structure with vault_list or vault_list_detailed and reuse a suitable directory. If no suitable directory exists, call vault_create_directory first. This tool never creates directories implicitly.",
+      description: "Deprecated upsert operation. Create or overwrite a Markdown note inside an existing directory. Prefer vault_create_note for creation and vault_replace_note for safe replacement. This tool never creates directories implicitly.",
       inputSchema: {
         type: "object",
-        properties: { path: mdPath, content: { type: "string", description: "Full Markdown content." } },
+        properties: {
+          path: mdPath,
+          content: { type: "string", description: "Full Markdown content." },
+          expectedSha256: fileSha256
+        },
         required: ["path", "content"],
         additionalProperties: false
       },
-      handler: async (args) => {
-        await vault.write(String(args.path), String(args.content ?? ""));
-        return { message: "OK" };
-      }
+      outputSchema: localFileMutationOutputSchema,
+      handler: async (args) => localMutationSuccess(await vault.write(
+        args.path as string,
+        args.content as string,
+        args.expectedSha256 as string | undefined
+      ))
+    },
+    {
+      name: "vault_create_note",
+      title: "Vault Create Note",
+      description: "Create a new Markdown note without overwriting an existing path. The parent directory must already exist. Creation uses an atomic no-replace commit.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          path: mdPath,
+          content: { type: "string", description: "Full Markdown content." }
+        },
+        required: ["path", "content"],
+        additionalProperties: false
+      },
+      outputSchema: localFileMutationOutputSchema,
+      handler: async (args) => localMutationSuccess(await vault.createNote(args.path as string, args.content as string))
+    },
+    {
+      name: "vault_replace_note",
+      title: "Vault Replace Note",
+      description: "Replace an existing Markdown note only when its current raw-byte SHA-256 matches expectedSha256. The file must already exist.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          path: mdPath,
+          content: { type: "string", description: "Complete replacement Markdown content." },
+          expectedSha256: fileSha256
+        },
+        required: ["path", "content", "expectedSha256"],
+        additionalProperties: false
+      },
+      outputSchema: localFileMutationOutputSchema,
+      handler: async (args) => localMutationSuccess(await vault.replaceNote(
+        args.path as string,
+        args.content as string,
+        args.expectedSha256 as string
+      ))
     },
     {
       name: "vault_append",
       title: "Vault Append",
-      description: "Append Markdown content to a note, creating the Markdown file if missing. Inspect existing directories first and reuse a suitable one; if none exists, call vault_create_directory. Its parent directory must already exist and this tool never creates directories implicitly.",
+      description: "Append Markdown content to a note, creating the Markdown file if missing. expectedSha256 checks the current raw file bytes when supplied. The parent directory must already exist.",
       inputSchema: {
         type: "object",
-        properties: { path: mdPath, content: { type: "string", description: "Markdown content to append." } },
+        properties: {
+          path: mdPath,
+          content: { type: "string", description: "Markdown content to append." },
+          expectedSha256: fileSha256
+        },
         required: ["path", "content"],
         additionalProperties: false
       },
-      handler: async (args) => {
-        await vault.append(String(args.path), String(args.content ?? ""));
-        return { message: "OK" };
-      }
+      outputSchema: localFileMutationOutputSchema,
+      handler: async (args) => localMutationSuccess(await vault.append(
+        args.path as string,
+        args.content as string,
+        args.expectedSha256 as string | undefined
+      ))
     },
     {
       name: "vault_create_directory",
@@ -124,7 +248,7 @@ export function buildTools(vault: FsVault): Tool[] {
         additionalProperties: false
       },
       handler: async (args) => {
-        const result = await vault.createDirectory(String(args.parent ?? ""), String(args.name ?? ""), String(args.reason ?? ""));
+        const result = await vault.createDirectory(args.parent as string, args.name as string, args.reason as string);
         return { message: "OK", ...result };
       }
     },
@@ -145,20 +269,19 @@ export function buildTools(vault: FsVault): Tool[] {
           trimTargetWhitespace: { type: "boolean", description: "Trim whitespace around the existing target content before patching." },
           rejectIfContentPreexists: { type: "boolean", description: "Reject the patch if the exact content is already present in the target." },
           targetDelimiter: { type: "string", default: "::", description: "Delimiter used for frontmatter-like inline fields." },
-          targetScope: { type: "string", enum: ["content", "marker", "markerAndContent"], default: "content", description: "For block targets, choose whether to patch content, the marker line, or both." }
+          targetScope: { type: "string", enum: ["content", "marker", "markerAndContent"], default: "content", description: "For block targets, choose whether to patch content, the marker line, or both." },
+          expectedSha256: fileSha256
         },
         required: ["path", "targetType", "target", "operation", "content"],
         additionalProperties: false
       },
+      outputSchema: localFileMutationOutputSchema,
       handler: async (args) => {
         const patchArgs = {
           targetType: args.targetType as "heading" | "block" | "frontmatter",
-          target: String(args.target),
+          target: args.target as string,
           operation: args.operation as "replace" | "prepend" | "append",
-          content: args.content,
-          createTargetIfMissing: Boolean(args.createTargetIfMissing),
-          trimTargetWhitespace: Boolean(args.trimTargetWhitespace),
-          rejectIfContentPreexists: Boolean(args.rejectIfContentPreexists)
+          content: args.content
         } as {
           targetType: "heading" | "block" | "frontmatter";
           target: string;
@@ -172,47 +295,111 @@ export function buildTools(vault: FsVault): Tool[] {
           targetScope?: "content" | "marker" | "markerAndContent";
         };
         if (typeof args.contentType === "string") patchArgs.contentType = args.contentType;
+        if (typeof args.createTargetIfMissing === "boolean") patchArgs.createTargetIfMissing = args.createTargetIfMissing;
+        if (typeof args.trimTargetWhitespace === "boolean") patchArgs.trimTargetWhitespace = args.trimTargetWhitespace;
+        if (typeof args.rejectIfContentPreexists === "boolean") patchArgs.rejectIfContentPreexists = args.rejectIfContentPreexists;
         if (typeof args.targetDelimiter === "string") patchArgs.targetDelimiter = args.targetDelimiter;
         if (args.targetScope === "content" || args.targetScope === "marker" || args.targetScope === "markerAndContent") {
           patchArgs.targetScope = args.targetScope;
         }
-        await vault.patch(String(args.path), patchArgs);
-        return { message: "OK" };
+        return localMutationSuccess(await vault.patch(args.path as string, patchArgs, args.expectedSha256 as string | undefined));
       }
     },
     {
       name: "vault_delete",
       title: "Vault Delete",
-      description: "Delete a vault file, including attachments, or delete an empty directory. Non-empty directories are rejected.",
+      description: "Delete a vault file, including attachments, or delete an empty directory. expectedSha256 applies only to files and hashes raw bytes. Non-empty directories are rejected.",
       inputSchema: {
         type: "object",
-        properties: { path: { type: "string", description: "Vault-relative file path, attachment path, or empty directory path. Non-empty directories are rejected." } },
+        properties: {
+          path: { type: "string", minLength: 1, description: "Vault-relative file path, attachment path, or empty directory path. Non-empty directories are rejected." },
+          expectedSha256: fileSha256
+        },
         required: ["path"],
         additionalProperties: false
       },
+      outputSchema: deleteMutationOutputSchema,
       handler: async (args) => {
-        await vault.delete(String(args.path));
-        return { message: "OK" };
+        const result = await vault.delete(args.path as string, args.expectedSha256 as string | undefined);
+        return result.operationId
+          ? {
+              ok: true,
+              executionMode: "wal",
+              operationId: result.operationId,
+              status: "queued",
+              outcome: "applied",
+              commitLevel: "local",
+              path: result.path
+            }
+          : {
+              ok: true,
+              executionMode: "synchronous",
+              status: "succeeded",
+              outcome: "applied",
+              commitLevel: "local",
+              path: result.path
+            };
       }
     },
     {
       name: "vault_move",
       title: "Vault Move",
-      description: "Move or rename a vault file into an existing destination directory. This tool never creates directories. If destination ends with '/', the original filename is preserved. Markdown files cannot be renamed to non-Markdown paths, or vice versa.",
+      description: "Move or rename a vault file into an existing destination directory. expectedSha256 and expectedDestinationSha256 hash raw file bytes. Overwrite uses one atomic rename and never deletes the destination first.",
       inputSchema: {
         type: "object",
         properties: {
           path: vaultPath,
-          destination: { type: "string", description: "Destination vault-relative file path, or a directory ending with '/' to preserve the original filename." },
-          allowOverwrite: { type: "boolean", default: false, description: "Set true to replace an existing destination file." }
+          destination: { type: "string", minLength: 1, description: "Destination vault-relative file path, or a directory ending with '/' to preserve the original filename." },
+          allowOverwrite: { type: "boolean", default: false, description: "Set true to atomically replace an existing destination file." },
+          expectedSha256: fileSha256,
+          expectedDestinationSha256: fileSha256
         },
         required: ["path", "destination"],
         additionalProperties: false
       },
+      outputSchema: moveMutationOutputSchema,
       handler: async (args) => {
-        const newPath = await vault.move(String(args.path), String(args.destination), Boolean(args.allowOverwrite));
-        return { message: "OK", oldPath: args.path, newPath };
+        const result = await vault.move(
+          args.path as string,
+          args.destination as string,
+          args.allowOverwrite as boolean | undefined ?? false,
+          args.expectedSha256 as string | undefined,
+          args.expectedDestinationSha256 as string | undefined
+        );
+        return result.operationId
+          ? {
+              ok: true,
+              executionMode: "wal",
+              operationId: result.operationId,
+              status: "queued",
+              outcome: "applied",
+              commitLevel: "local",
+              oldPath: result.oldPath,
+              newPath: result.newPath
+            }
+          : {
+              ok: true,
+              executionMode: "synchronous",
+              status: "succeeded",
+              outcome: "applied",
+              commitLevel: "local",
+              oldPath: result.oldPath,
+              newPath: result.newPath
+            };
       }
+    },
+    {
+      name: "vault_get_operation",
+      title: "Vault Get Operation",
+      description: "Query a persistent WAL operation returned by a file move or delete. A not-found result may also mean the record exceeded retention or the WAL storage is unavailable.",
+      inputSchema: {
+        type: "object",
+        properties: { operationId: operationIdSchema },
+        required: ["operationId"],
+        additionalProperties: false
+      },
+      outputSchema: operationStatusOutputSchema,
+      handler: async (args) => vault.getOperation(args.operationId as string)
     },
     {
       name: "vault_get_document_map",
@@ -224,7 +411,7 @@ export function buildTools(vault: FsVault): Tool[] {
         required: ["path"],
         additionalProperties: false
       },
-      handler: async (args) => vault.documentMap(String(args.path))
+      handler: async (args) => vault.documentMap(args.path as string)
     },
     {
       name: "search_simple",
@@ -240,7 +427,7 @@ export function buildTools(vault: FsVault): Tool[] {
         required: ["query"],
         additionalProperties: false
       },
-      handler: async (args) => vault.searchSimple(String(args.query), Number(args.contextLength ?? 100), Number(args.limit ?? 100))
+      handler: async (args) => vault.searchSimple(args.query as string, (args.contextLength as number | undefined) ?? 100, (args.limit as number | undefined) ?? 100)
     },
     {
       name: "search_query",
@@ -307,7 +494,7 @@ export function buildTools(vault: FsVault): Tool[] {
         additionalProperties: false
       },
       handler: async (args) => {
-        const input: Parameters<FsVault["assetAudit"]>[0] = { root: String(args.root ?? "") };
+        const input: Parameters<FsVault["assetAudit"]>[0] = { root: args.root as string };
         if (typeof args.recursive === "boolean") input.recursive = args.recursive;
         if (typeof args.scope === "string") input.scope = args.scope;
         if (typeof args.includeSha256 === "boolean") input.includeSha256 = args.includeSha256;
@@ -335,7 +522,7 @@ export function buildTools(vault: FsVault): Tool[] {
         additionalProperties: false
       },
       handler: async (args) => {
-        const path = await vault.appendInbox(String(args.title ?? ""), String(args.content ?? ""));
+        const path = await vault.appendInbox((args.title as string | undefined) ?? "", args.content as string);
         return { message: "OK", path };
       }
     },
@@ -359,9 +546,9 @@ export function buildTools(vault: FsVault): Tool[] {
       },
       handler: async (args) => {
         const input: { filename: string; mimeType: string; contentBase64: string; expectedSha256?: string; expectedSize?: number; preserveOriginal?: boolean; dir?: string } = {
-          filename: String(args.filename ?? ""),
-          mimeType: String(args.mimeType ?? ""),
-          contentBase64: String(args.contentBase64 ?? "")
+          filename: args.filename as string,
+          mimeType: args.mimeType as string,
+          contentBase64: args.contentBase64 as string
         };
         if (typeof args.expectedSha256 === "string") input.expectedSha256 = args.expectedSha256;
         if (typeof args.expectedSize === "number") input.expectedSize = args.expectedSize;
@@ -400,7 +587,7 @@ export function buildTools(vault: FsVault): Tool[] {
         required: ["path", "content", "assets"],
         additionalProperties: false
       },
-      handler: async (args) => vault.createNoteWithAssets(String(args.path), String(args.content ?? ""), parseImageAssets(args.assets))
+      handler: async (args) => vault.createNoteWithAssets(args.path as string, args.content as string, parseImageAssets(args.assets))
     },
     {
       name: "vault_create_external_reference_note",
@@ -442,8 +629,8 @@ export function buildTools(vault: FsVault): Tool[] {
           keyFindings?: string[];
           nextActions?: string[];
         } = {
-          path: String(args.path),
-          title: String(args.title ?? ""),
+          path: args.path as string,
+          title: args.title as string,
           references: parseExternalReferences(args.references)
         };
         if (typeof args.summary === "string") input.summary = args.summary;
@@ -458,9 +645,59 @@ export function buildTools(vault: FsVault): Tool[] {
   return tools.filter((tool) => toolEnabled(tool.name));
 }
 
+
+function localMutationSuccess(result: { path: string; revision: { sha256: string; size: number; mtimeMs: number } }): Record<string, unknown> {
+  return {
+    ok: true,
+    executionMode: "synchronous",
+    status: "succeeded",
+    outcome: "applied",
+    commitLevel: "local",
+    ...result
+  };
+}
+
+function mutationOutputSchema(
+  fields: Record<string, unknown>,
+  requiredFields: string[]
+): Record<string, unknown> {
+  const common = {
+    ok: { const: true },
+    outcome: { const: "applied" },
+    commitLevel: { const: "local" },
+    ...fields
+  };
+  return {
+    type: "object",
+    oneOf: [
+      {
+        type: "object",
+        properties: {
+          ...common,
+          executionMode: { const: "synchronous" },
+          status: { const: "succeeded" }
+        },
+        required: ["ok", "executionMode", "status", "outcome", "commitLevel", ...requiredFields],
+        additionalProperties: false
+      },
+      {
+        type: "object",
+        properties: {
+          ...common,
+          executionMode: { const: "wal" },
+          operationId: operationIdSchema,
+          status: { const: "queued" }
+        },
+        required: ["ok", "executionMode", "operationId", "status", "outcome", "commitLevel", ...requiredFields],
+        additionalProperties: false
+      }
+    ]
+  };
+}
+
 function toolEnabled(name: string): boolean {
   if (!config.readOnly) {
-    if (name === "vault_write") return config.enableVaultWrite;
+    if (name === "vault_write" || name === "vault_create_note" || name === "vault_replace_note") return config.enableVaultWrite;
     if (name === "vault_append") return config.enableVaultAppend;
     if (name === "vault_patch") return config.enableVaultPatch;
     if (name === "vault_delete") return config.enableVaultDelete;
@@ -475,6 +712,8 @@ function toolEnabled(name: string): boolean {
 
   return ![
     "vault_write",
+    "vault_create_note",
+    "vault_replace_note",
     "vault_append",
     "vault_patch",
     "vault_delete",
@@ -493,9 +732,9 @@ function parseImageAssets(value: unknown): Array<{ filename: string; mimeType: s
     if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error(`assets[${index}] must be an object`);
     const record = item as Record<string, unknown>;
     const parsed: { filename: string; mimeType: string; contentBase64: string; expectedSha256?: string; expectedSize?: number; preserveOriginal?: boolean } = {
-      filename: String(record.filename ?? ""),
-      mimeType: String(record.mimeType ?? ""),
-      contentBase64: String(record.contentBase64 ?? "")
+      filename: record.filename as string,
+      mimeType: record.mimeType as string,
+      contentBase64: record.contentBase64 as string
     };
     if (typeof record.expectedSha256 === "string") parsed.expectedSha256 = record.expectedSha256;
     if (typeof record.expectedSize === "number") parsed.expectedSize = record.expectedSize;
@@ -510,8 +749,8 @@ function parseExternalReferences(value: unknown): Array<{ label: string; locatio
     if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error(`references[${index}] must be an object`);
     const record = item as Record<string, unknown>;
     const reference: { label: string; location: string; type?: string; note?: string } = {
-      label: String(record.label ?? ""),
-      location: String(record.location ?? "")
+      label: record.label as string,
+      location: record.location as string
     };
     if (typeof record.type === "string") reference.type = record.type;
     if (typeof record.note === "string") reference.note = record.note;

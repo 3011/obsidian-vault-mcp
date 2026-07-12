@@ -1,6 +1,6 @@
 {
   "name": "obsidian-vault-mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "Headless Obsidian vault MCP server backed by a Markdown filesystem vault.",
   "license": "MIT",
@@ -17,7 +17,7 @@
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "node dist/src/server.js",
-    "test": "npm run build && node dist/test/markdown-unit.js && node dist/test/integration.js && node dist/test/asset-audit.js && node dist/test/assets.js && node dist/test/recovery.js && node dist/test/mutations.js && node dist/test/livesync-controller.js && node dist/test/concurrency.js && node dist/test/markdown-yaml.js && node dist/test/sdk-client.js",
+    "test": "npm run build && node dist/test/markdown-unit.js && node dist/test/integration.js && node dist/test/safe-writes.js && node dist/test/output-contract.js && node dist/test/asset-audit.js && node dist/test/assets.js && node dist/test/recovery.js && node dist/test/mutations.js && node dist/test/livesync-controller.js && node dist/test/concurrency.js && node dist/test/markdown-yaml.js && node dist/test/sdk-client.js",
     "test:unit": "npm run build && node dist/test/markdown-unit.js",
     "test:integration": "npm run build && node dist/test/integration.js",
     "test:assets": "npm run build && node dist/test/assets.js",
@@ -38,6 +38,7 @@
     "typescript-eslint": "^8.61.1"
   },
   "dependencies": {
+    "ajv": "^8.20.0",
     "markdown-patch": "^1.0.0",
     "yaml": "^2.9.0"
   }
