@@ -24,8 +24,8 @@ spec:
         runAsGroup: 1000
         fsGroup: 1000
       containers:
-        - name: obsidian-vault-mcp
-          image: ghcr.io/3011/obsidian-vault-mcp:main
+        - name: mcp
+          image: 10.10.0.1:30500/obsidian-vault-mcp:phase1-20260712
           imagePullPolicy: Always
           env:
             - name: VAULT_ROOT
@@ -63,11 +63,11 @@ spec:
             - name: ALLOWED_IMAGE_MIME_TYPES
               value: image/png,image/jpeg,image/webp,image/gif
             - name: IMAGE_ASSET_INTEGRITY_MODE
-              value: required_for_preserve_original
+              value: required
             - name: ENABLE_AUDIT_LOG
               value: "true"
             - name: AUDIT_LOG_PATH
-              value: /data/audit/obsidian-vault-mcp.audit.log
+              value: /data/vault/.audit/obsidian-vault-mcp.audit.log
             - name: MUTATION_QUEUE_DIR
               value: /mutations
             - name: TRASH_DELETE
@@ -84,9 +84,6 @@ spec:
           volumeMounts:
             - name: vault
               mountPath: /data/vault
-            - name: vault
-              mountPath: /data/audit
-              subPath: .audit
             - name: mutations
               mountPath: /mutations
           readinessProbe:
@@ -111,7 +108,7 @@ spec:
       volumes:
         - name: vault
           persistentVolumeClaim:
-            claimName: obsidian-vault-mcp
+            claimName: obsidian-vault
         - name: mutations
           persistentVolumeClaim:
             claimName: obsidian-mutations

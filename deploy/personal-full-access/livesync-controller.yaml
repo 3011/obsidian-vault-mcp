@@ -25,19 +25,27 @@ spec:
         fsGroup: 1000
       containers:
         - name: obsidian-livesync-controller
-          image: ghcr.io/3011/obsidian-livesync-controller:main
+          image: 10.10.0.1:30500/obsidian-livesync-controller:phase1-20260712
           imagePullPolicy: Always
           env:
             - name: LIVESYNC_DB_PATH
-              value: /data
+              value: /data/daemon
             - name: LIVESYNC_SETTINGS
-              value: /data/.livesync/settings.json
+              value: /data/daemon/settings.json
             - name: LIVESYNC_VAULT
               value: /vault
             - name: MUTATION_QUEUE_DIR
               value: /mutations
+            - name: CONTROLLER_PENDING_TIMEOUT_MS
+              value: "60000"
             - name: CONTROLLER_PROCESSING_TIMEOUT_MS
               value: "600000"
+            - name: CONTROLLER_CLI_MAX_ATTEMPTS
+              value: "6"
+            - name: CONTROLLER_CLI_RETRY_BASE_MS
+              value: "1000"
+            - name: CONTROLLER_CLI_RETRY_MAX_MS
+              value: "15000"
             - name: CONTROLLER_POLL_INTERVAL_MS
               value: "5000"
           volumeMounts:
@@ -57,7 +65,7 @@ spec:
       volumes:
         - name: vault
           persistentVolumeClaim:
-            claimName: obsidian-vault-mcp
+            claimName: obsidian-vault
         - name: livesync-db
           persistentVolumeClaim:
             claimName: obsidian-livesync-db

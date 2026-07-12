@@ -8,22 +8,26 @@ await testDeleteMutation();
 await testMoveMutation();
 await testMoveThenDeleteMutation();
 await testProcessingRecovery();
+await testPendingDeleteRecovery();
+await testPendingMoveRecovery();
+await testPendingMoveCancellation();
+await testPendingMoveAmbiguousFailure();
+await testCliLockRetry();
 console.log("livesync-controller ok");
+
+type Fixture = {
+  root: string;
+  vault: string;
+  mutations: string;
+  bin: string;
+  log: string;
+  state: string;
+};
 
 async function testDeleteMutation(): Promise<void> {
   const fixture = await createFixture();
   try {
-    await writeMutation(fixture.mutations, "ready", {
-      schemaVersion: 1,
-      id: "delete-1",
-      source: "obsidian-vault-mcp",
-      op: "delete",
-      state: "ready",
-      path: "Notes/delete.md",
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      attempt: 0
-    });
+    await writeMutation(fixture.mutations, "ready", mutation({ id: "delete-1", op: "delete", path: "Notes/delete.md" }));
     const controller = startController(fixture);
     await waitForDone(fixture, "delete-1", controller);
     controller.kill("SIGTERM");
@@ -40,19 +44,13 @@ async function testMoveMutation(): Promise<void> {
   try {
     await mkdir(path.join(fixture.vault, "Notes"), { recursive: true });
     await writeFile(path.join(fixture.vault, "Notes", "new.md"), "new\n", "utf8");
-    await writeMutation(fixture.mutations, "ready", {
-      schemaVersion: 1,
+    await writeMutation(fixture.mutations, "ready", mutation({
       id: "move-1",
-      source: "obsidian-vault-mcp",
       op: "move",
-      state: "ready",
       oldPath: "Notes/old.md",
       newPath: "Notes/new.md",
-      allowOverwrite: false,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      attempt: 0
-    });
+      allowOverwrite: false
+    }));
     const controller = startController(fixture);
     await waitForDone(fixture, "move-1", controller);
     controller.kill("SIGTERM");
@@ -69,30 +67,18 @@ async function testMoveMutation(): Promise<void> {
 async function testMoveThenDeleteMutation(): Promise<void> {
   const fixture = await createFixture();
   try {
-    await writeMutation(fixture.mutations, "ready", {
-      schemaVersion: 1,
+    await writeMutation(fixture.mutations, "ready", mutation({
       id: "move-delete-1",
-      source: "obsidian-vault-mcp",
       op: "move",
-      state: "ready",
       oldPath: "Notes/old.md",
       newPath: "Notes/missing-after-delete.md",
-      allowOverwrite: false,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      attempt: 0
-    });
-    await writeMutation(fixture.mutations, "ready", {
-      schemaVersion: 1,
+      allowOverwrite: false
+    }));
+    await writeMutation(fixture.mutations, "ready", mutation({
       id: "move-delete-2",
-      source: "obsidian-vault-mcp",
       op: "delete",
-      state: "ready",
-      path: "Notes/missing-after-delete.md",
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      attempt: 0
-    });
+      path: "Notes/missing-after-delete.md"
+    }));
     const controller = startController(fixture);
     await waitForDone(fixture, "move-delete-1", controller);
     await waitForDone(fixture, "move-delete-2", controller);
@@ -104,24 +90,17 @@ async function testMoveThenDeleteMutation(): Promise<void> {
   }
 }
 
-
 async function testProcessingRecovery(): Promise<void> {
   const fixture = await createFixture();
   try {
-    await writeMutation(fixture.mutations, "processing", {
-      schemaVersion: 1,
+    await writeMutation(fixture.mutations, "processing", mutation({
       id: "processing-delete-1",
-      source: "obsidian-vault-mcp",
       op: "delete",
-      state: "processing",
       path: "Notes/stuck.md",
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      state: "processing",
       attempt: 1
-    });
-    const processingPath = path.join(fixture.mutations, "processing", "processing-delete-1.json");
-    const old = new Date(Date.now() - 60_000);
-    await utimes(processingPath, old, old);
+    }));
+    await ageMutation(fixture.mutations, "processing", "processing-delete-1");
     const controller = startController(fixture, { CONTROLLER_PROCESSING_TIMEOUT_MS: "1" });
     await waitForDone(fixture, "processing-delete-1", controller);
     controller.kill("SIGTERM");
@@ -132,24 +111,152 @@ async function testProcessingRecovery(): Promise<void> {
   }
 }
 
-async function createFixture(): Promise<{ root: string; vault: string; mutations: string; bin: string; log: string }> {
+async function testPendingDeleteRecovery(): Promise<void> {
+  const fixture = await createFixture();
+  try {
+    await writeMutation(fixture.mutations, "pending", mutation({
+      id: "pending-delete-1",
+      op: "delete",
+      path: "Notes/pending-delete.md",
+      state: "pending"
+    }));
+    await ageMutation(fixture.mutations, "pending", "pending-delete-1");
+    const controller = startController(fixture, { CONTROLLER_PENDING_TIMEOUT_MS: "1" });
+    await waitForDone(fixture, "pending-delete-1", controller);
+    controller.kill("SIGTERM");
+    const commands = await readCommands(fixture.log);
+    assert.equal(commands.at(0)?.command, "rm");
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+}
+
+async function testPendingMoveRecovery(): Promise<void> {
+  const fixture = await createFixture();
+  try {
+    await mkdir(path.join(fixture.vault, "Notes"), { recursive: true });
+    await writeFile(path.join(fixture.vault, "Notes", "pending-new.md"), "new\n", "utf8");
+    await writeMutation(fixture.mutations, "pending", mutation({
+      id: "pending-move-1",
+      op: "move",
+      oldPath: "Notes/pending-old.md",
+      newPath: "Notes/pending-new.md",
+      state: "pending"
+    }));
+    await ageMutation(fixture.mutations, "pending", "pending-move-1");
+    const controller = startController(fixture, { CONTROLLER_PENDING_TIMEOUT_MS: "1" });
+    await waitForDone(fixture, "pending-move-1", controller);
+    controller.kill("SIGTERM");
+    const commands = await readCommands(fixture.log);
+    assert.deepEqual(commands.map((command) => command.command).slice(0, 2), ["rm", "push"]);
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+}
+
+async function testPendingMoveCancellation(): Promise<void> {
+  const fixture = await createFixture();
+  try {
+    await mkdir(path.join(fixture.vault, "Notes"), { recursive: true });
+    await writeFile(path.join(fixture.vault, "Notes", "cancel-old.md"), "old\n", "utf8");
+    await writeMutation(fixture.mutations, "pending", mutation({
+      id: "pending-cancel-1",
+      op: "move",
+      oldPath: "Notes/cancel-old.md",
+      newPath: "Notes/cancel-new.md",
+      state: "pending"
+    }));
+    await ageMutation(fixture.mutations, "pending", "pending-cancel-1");
+    const controller = startController(fixture, { CONTROLLER_PENDING_TIMEOUT_MS: "1" });
+    await waitForState(fixture, "cancelled", "pending-cancel-1", controller);
+    controller.kill("SIGTERM");
+    const record = JSON.parse(await readFile(path.join(fixture.mutations, "cancelled", "pending-cancel-1.json"), "utf8")) as Record<string, unknown>;
+    assert.match(String(record.recoveryReason), /did not complete/);
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+}
+
+async function testPendingMoveAmbiguousFailure(): Promise<void> {
+  const fixture = await createFixture();
+  try {
+    await mkdir(path.join(fixture.vault, "Notes"), { recursive: true });
+    await writeFile(path.join(fixture.vault, "Notes", "ambiguous-old.md"), "old\n", "utf8");
+    await writeFile(path.join(fixture.vault, "Notes", "ambiguous-new.md"), "new\n", "utf8");
+    await writeMutation(fixture.mutations, "pending", mutation({
+      id: "pending-ambiguous-1",
+      op: "move",
+      oldPath: "Notes/ambiguous-old.md",
+      newPath: "Notes/ambiguous-new.md",
+      state: "pending"
+    }));
+    await ageMutation(fixture.mutations, "pending", "pending-ambiguous-1");
+    const controller = startController(fixture, { CONTROLLER_PENDING_TIMEOUT_MS: "1" });
+    await waitForState(fixture, "failed", "pending-ambiguous-1", controller);
+    controller.kill("SIGTERM");
+    const record = JSON.parse(await readFile(path.join(fixture.mutations, "failed", "pending-ambiguous-1.json"), "utf8")) as Record<string, unknown>;
+    assert.match(String(record.error), /ambiguous/);
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+}
+
+async function testCliLockRetry(): Promise<void> {
+  const fixture = await createFixture();
+  try {
+    await writeMutation(fixture.mutations, "ready", mutation({
+      id: "retry-delete-1",
+      op: "delete",
+      path: "Notes/retry-delete.md"
+    }));
+    const controller = startController(fixture, {
+      FAKE_CLI_FAIL_ONCE_COMMAND: "rm",
+      CONTROLLER_CLI_MAX_ATTEMPTS: "3",
+      CONTROLLER_CLI_RETRY_BASE_MS: "1",
+      CONTROLLER_CLI_RETRY_MAX_MS: "2"
+    });
+    await waitForDone(fixture, "retry-delete-1", controller);
+    controller.kill("SIGTERM");
+    const commands = await readCommands(fixture.log);
+    assert.deepEqual(commands.map((command) => command.command).slice(0, 2), ["rm", "rm"]);
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+}
+
+function mutation(input: Record<string, unknown>): Record<string, unknown> {
+  const now = new Date().toISOString();
+  return {
+    schemaVersion: 1,
+    source: "obsidian-vault-mcp",
+    state: "ready",
+    createdAt: now,
+    updatedAt: now,
+    attempt: 0,
+    ...input
+  };
+}
+
+async function createFixture(): Promise<Fixture> {
   const root = await mkdtemp(path.join(os.tmpdir(), "obsidian-livesync-controller-"));
   const vault = path.join(root, "vault");
   const mutations = path.join(root, "mutations");
   const bin = path.join(root, "bin");
   const log = path.join(root, "commands.log");
+  const state = path.join(root, "state");
   await mkdir(vault, { recursive: true });
   await mkdir(bin, { recursive: true });
-  for (const state of ["pending", "ready", "processing", "done", "failed", "cancelled"]) {
-    await mkdir(path.join(mutations, state), { recursive: true });
+  await mkdir(state, { recursive: true });
+  for (const mutationState of ["pending", "ready", "processing", "done", "failed", "cancelled"]) {
+    await mkdir(path.join(mutations, mutationState), { recursive: true });
   }
   const fakeCli = path.join(bin, "livesync-cli");
   await writeFile(fakeCli, fakeCliScript(log), "utf8");
   await chmod(fakeCli, 0o755);
-  return { root, vault, mutations, bin, log };
+  return { root, vault, mutations, bin, log, state };
 }
 
-function startController(fixture: { root: string; vault: string; mutations: string; bin: string }, env: Record<string, string> = {}) {
+function startController(fixture: Fixture, env: Record<string, string> = {}) {
   const controller = spawn(process.execPath, ["livesync-controller/controller.mjs"], {
     cwd: path.resolve(import.meta.dirname, "../.."),
     env: {
@@ -159,8 +266,13 @@ function startController(fixture: { root: string; vault: string; mutations: stri
       LIVESYNC_SETTINGS: path.join(fixture.root, "data", ".livesync", "settings.json"),
       LIVESYNC_VAULT: fixture.vault,
       MUTATION_QUEUE_DIR: fixture.mutations,
-      CONTROLLER_POLL_INTERVAL_MS: "50",
+      CONTROLLER_POLL_INTERVAL_MS: "25",
+      CONTROLLER_PENDING_TIMEOUT_MS: "5000",
+      CONTROLLER_PROCESSING_TIMEOUT_MS: "5000",
       CONTROLLER_SHUTDOWN_TIMEOUT_MS: "1000",
+      CONTROLLER_CLI_RETRY_BASE_MS: "1",
+      CONTROLLER_CLI_RETRY_MAX_MS: "2",
+      FAKE_CLI_STATE_DIR: fixture.state,
       ...env
     },
     stdio: ["ignore", "pipe", "pipe"]
@@ -178,8 +290,14 @@ async function writeMutation(root: string, state: string, record: Record<string,
   await writeFile(path.join(root, state, `${record.id}.json`), `${JSON.stringify(record, null, 2)}\n`, "utf8");
 }
 
-async function waitForDone(fixture: { mutations: string; log: string }, id: string, controller?: ReturnType<typeof startController>): Promise<void> {
-  for (let index = 0; index < 100; index += 1) {
+async function ageMutation(root: string, state: string, id: string): Promise<void> {
+  const file = path.join(root, state, `${id}.json`);
+  const old = new Date(Date.now() - 60_000);
+  await utimes(file, old, old);
+}
+
+async function waitForDone(fixture: Fixture, id: string, controller?: ReturnType<typeof startController>): Promise<void> {
+  for (let index = 0; index < 200; index += 1) {
     const doneRoot = path.join(fixture.mutations, "done");
     const dates = await readdir(doneRoot).catch(() => []);
     for (const date of dates) {
@@ -190,24 +308,50 @@ async function waitForDone(fixture: { mutations: string; log: string }, id: stri
         // keep waiting
       }
     }
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await new Promise((resolve) => setTimeout(resolve, 25));
   }
+  throw new Error(await failureDetails(fixture, id, controller));
+}
+
+async function waitForState(fixture: Fixture, state: string, id: string, controller?: ReturnType<typeof startController>): Promise<void> {
+  for (let index = 0; index < 200; index += 1) {
+    try {
+      await stat(path.join(fixture.mutations, state, `${id}.json`));
+      return;
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
+  throw new Error(await failureDetails(fixture, id, controller));
+}
+
+async function failureDetails(fixture: Fixture, id: string, controller?: ReturnType<typeof startController>): Promise<string> {
   const output = controller?.output();
-  throw new Error(`mutation did not finish: ${id}\nstdout:\n${output?.stdout || ""}\nstderr:\n${output?.stderr || ""}\nmutations:\n${await describeMutations(fixture.mutations)}\nfailed:\n${await readFailed(fixture.mutations)}\ncommands:\n${await readFile(fixture.log, "utf8").catch(() => "")}`);
+  return `mutation did not finish: ${id}\nstdout:\n${output?.stdout || ""}\nstderr:\n${output?.stderr || ""}\nmutations:\n${await describeMutations(fixture.mutations)}\nfailed:\n${await readFailed(fixture.mutations)}\ncommands:\n${await readFile(fixture.log, "utf8").catch(() => "")}`;
 }
 
 async function readCommands(log: string): Promise<Array<{ command: string; args: string[] }>> {
-  const content = await readFile(log, "utf8");
-  return content.trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
+  const content = await readFile(log, "utf8").catch(() => "");
+  return content.trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as { command: string; args: string[] });
 }
 
 function fakeCliScript(log: string): string {
   return `#!/usr/bin/env node
 const fs = require("node:fs");
+const path = require("node:path");
 const args = process.argv.slice(2);
 const commands = new Set(["daemon", "rm", "push", "sync", "info"]);
 const command = args.find((arg) => commands.has(arg));
 fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ command, args }) + "\\n");
+const failOnce = process.env.FAKE_CLI_FAIL_ONCE_COMMAND;
+if (failOnce && command === failOnce) {
+  const marker = path.join(process.env.FAKE_CLI_STATE_DIR || ".", "failed-once-" + command);
+  if (!fs.existsSync(marker)) {
+    fs.writeFileSync(marker, "1");
+    process.stderr.write("Could not initialise database: IO error: lock held by another process\\n");
+    process.exit(1);
+  }
+}
 if (command === "daemon") {
   process.on("SIGTERM", () => process.exit(0));
   setInterval(() => {}, 1000);
