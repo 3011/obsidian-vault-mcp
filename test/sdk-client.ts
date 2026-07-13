@@ -51,13 +51,34 @@ try {
     assert(tool?.outputSchema && tool.outputSchema.type === "object", `missing object outputSchema for ${name}`);
   }
 
-  const appendInboxTool = tools.tools.find((item) => item.name === "append_to_inbox");
-  assert.deepEqual(appendInboxTool?.annotations, {
-    readOnlyHint: false,
-    destructiveHint: false,
-    idempotentHint: false,
-    openWorldHint: false
-  });
+  const expectedAnnotations: Record<string, Record<string, boolean>> = {
+    vault_list: readOnlyAnnotations(),
+    vault_list_detailed: readOnlyAnnotations(),
+    vault_read: readOnlyAnnotations(),
+    vault_write: annotations(false, true, false),
+    vault_create_note: annotations(false, false, true),
+    vault_replace_note: annotations(false, true, true),
+    vault_append: annotations(false, false, false),
+    vault_create_directory: annotations(false, false, true),
+    vault_patch: annotations(false, true, false),
+    vault_delete: annotations(false, true, true),
+    vault_move: annotations(false, true, true),
+    vault_get_operation: readOnlyAnnotations(),
+    vault_get_document_map: readOnlyAnnotations(),
+    search_simple: readOnlyAnnotations(),
+    search_query: readOnlyAnnotations(),
+    find_asset_references: readOnlyAnnotations(),
+    asset_audit: readOnlyAnnotations(),
+    tag_list: readOnlyAnnotations(),
+    append_to_inbox: annotations(false, false, false),
+    vault_upload_image_asset: annotations(false, false, false),
+    vault_create_note_with_assets: annotations(false, true, false),
+    vault_create_external_reference_note: annotations(false, true, false)
+  };
+  assert.equal(tools.tools.length, Object.keys(expectedAnnotations).length);
+  for (const tool of tools.tools) {
+    assert.deepEqual(tool.annotations, expectedAnnotations[tool.name], `incorrect annotations for ${tool.name}`);
+  }
 
   const readResult = await client.callTool({
     name: "vault_read",
@@ -98,6 +119,14 @@ try {
 } finally {
   child.kill("SIGTERM");
   await rm(root, { recursive: true, force: true });
+}
+
+function annotations(readOnlyHint: boolean, destructiveHint: boolean, idempotentHint: boolean): Record<string, boolean> {
+  return { readOnlyHint, destructiveHint, idempotentHint, openWorldHint: false };
+}
+
+function readOnlyAnnotations(): Record<string, boolean> {
+  return annotations(true, false, true);
 }
 
 function textOf(result: Awaited<ReturnType<Client["callTool"]>>): string {

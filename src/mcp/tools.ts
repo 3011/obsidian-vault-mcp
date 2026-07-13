@@ -1,11 +1,46 @@
 import { config } from "../config.js";
 import { FsVault } from "../vault/FsVault.js";
-import type { Tool } from "./types.js";
+import type { Tool, ToolAnnotations } from "./types.js";
 
 const mdPath = { type: "string", description: "Vault-relative Markdown note path ending in .md. The parent directory must already exist; writes to the vault root, absolute paths, and traversal are rejected." };
 const vaultPath = { type: "string", minLength: 1, description: "Vault-relative file path. Absolute paths and traversal are rejected." };
 const fileSha256 = { type: "string", pattern: "^[0-9a-fA-F]{64}$", description: "SHA-256 of the file raw bytes returned by vault_read revision.sha256. No Markdown or newline normalization is applied." };
 const operationIdSchema = { type: "string", pattern: "^[0-9]{8}T[0-9]{9}Z-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", description: "Persistent WAL operation ID returned by a file move or delete." };
+
+const readOnlyAnnotations: ToolAnnotations = {
+  readOnlyHint: true,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: false
+};
+
+const createOnlyAnnotations: ToolAnnotations = {
+  readOnlyHint: false,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: false
+};
+
+const nonDestructiveWriteAnnotations: ToolAnnotations = {
+  readOnlyHint: false,
+  destructiveHint: false,
+  idempotentHint: false,
+  openWorldHint: false
+};
+
+const destructiveIdempotentAnnotations: ToolAnnotations = {
+  readOnlyHint: false,
+  destructiveHint: true,
+  idempotentHint: true,
+  openWorldHint: false
+};
+
+const destructiveWriteAnnotations: ToolAnnotations = {
+  readOnlyHint: false,
+  destructiveHint: true,
+  idempotentHint: false,
+  openWorldHint: false
+};
 
 
 const revisionOutputSchema = {
@@ -113,6 +148,7 @@ export function buildTools(vault: FsVault): Tool[] {
       name: "vault_list",
       title: "Vault List",
       description: "List regular files and subdirectories inside a vault directory, including Markdown notes and attachments such as images. Directory entries end with '/'.",
+      annotations: readOnlyAnnotations,
       inputSchema: {
         type: "object",
         properties: { path: { type: "string", description: "Vault-relative directory path to list. Omit or pass an empty string for the vault root." } },
@@ -124,6 +160,7 @@ export function buildTools(vault: FsVault): Tool[] {
       name: "vault_list_detailed",
       title: "Vault List Detailed",
       description: "Return structured facts for a vault path without modifying anything. Distinguishes missing paths, files, empty directories, non-empty directories, denied paths, and skipped entries; includes attachment metadata.",
+      annotations: readOnlyAnnotations,
       inputSchema: {
         type: "object",
         properties: {
@@ -145,6 +182,7 @@ export function buildTools(vault: FsVault): Tool[] {
       name: "vault_read",
       title: "Vault Read",
       description: "Read a Markdown note with metadata, or read a supported non-Markdown text file. Binary files and targeted reads on non-Markdown files are rejected.",
+      annotations: readOnlyAnnotations,
       inputSchema: {
         type: "object",
         properties: {
@@ -168,6 +206,7 @@ export function buildTools(vault: FsVault): Tool[] {
       name: "vault_write",
       title: "Vault Write",
       description: "Deprecated upsert operation. Create or overwrite a Markdown note inside an existing directory. Prefer vault_create_note for creation and vault_replace_note for safe replacement. This tool never creates directories implicitly.",
+      annotations: destructiveWriteAnnotations,
       inputSchema: {
         type: "object",
         properties: {
@@ -189,6 +228,7 @@ export function buildTools(vault: FsVault): Tool[] {
       name: "vault_create_note",
       title: "Vault Create Note",
       description: "Create a new Markdown note without overwriting an existing path. The parent directory must already exist. Creation uses an atomic no-replace commit.",
+      annotations: createOnlyAnnotations,
       inputSchema: {
         type: "object",
         properties: {
@@ -205,6 +245,7 @@ export function buildTools(vault: FsVault): Tool[] {
       name: "vault_replace_note",
       title: "Vault Replace Note",
       description: "Replace an existing Markdown note only when its current raw-byte SHA-256 matches expectedSha256. The file must already exist.",
+      annotations: destructiveIdempotentAnnotations,
       inputSchema: {
         type: "object",
         properties: {
@@ -226,6 +267,7 @@ export function buildTools(vault: FsVault): Tool[] {
       name: "vault_append",
       title: "Vault Append",
       description: "Append Markdown content to a note, creating the Markdown file if missing. expectedSha256 checks the current raw file bytes when supplied. The parent directory must already exist.",
+      annotations: nonDestructiveWriteAnnotations,
       inputSchema: {
         type: "object",
         properties: {
@@ -247,6 +289,7 @@ export function buildTools(vault: FsVault): Tool[] {
       name: "vault_create_directory",
       title: "Vault Create Directory",
       description: "Create exactly one new vault directory after inspecting the existing directory structure and determining that no suitable directory exists. The parent directory must already exist unless creating a new top-level directory, and nested paths must be created one level at a time. The reason must explain why existing directories are unsuitable and what the new directory will contain.",
+      annotations: createOnlyAnnotations,
       inputSchema: {
         type: "object",
         properties: {
@@ -266,6 +309,7 @@ export function buildTools(vault: FsVault): Tool[] {
       name: "vault_patch",
       title: "Vault Patch",
       description: "Patch a Markdown note heading, block reference, or frontmatter field with replace, prepend, or append.",
+      annotations: destructiveWriteAnnotations,
       inputSchema: {
         type: "object",
         properties: {
@@ -319,6 +363,7 @@ export function buildTools(vault: FsVault): Tool[] {
       name: "vault_delete",
       title: "Vault Delete",
       description: "Delete a vault file, including attachments, or delete an empty directory. expectedSha256 applies only to files and hashes raw bytes. Non-empty directories are rejected.",
+      annotations: destructiveIdempotentAnnotations,
       inputSchema: {
         type: "object",
         properties: {
@@ -355,6 +400,7 @@ export function buildTools(vault: FsVault): Tool[] {
       name: "vault_move",
       title: "Vault Move",
       description: "Move or rename a vault file into an existing destination directory. expectedSha256 and expectedDestinationSha256 hash raw file bytes. Overwrite uses one atomic rename and never deletes the destination first.",
+      annotations: destructiveIdempotentAnnotations,
       inputSchema: {
         type: "object",
         properties: {
@@ -402,6 +448,7 @@ export function buildTools(vault: FsVault): Tool[] {
       name: "vault_get_operation",
       title: "Vault Get Operation",
       description: "Query a persistent WAL operation returned by a file move or delete. A not-found result may also mean the record exceeded retention or the WAL storage is unavailable.",
+      annotations: readOnlyAnnotations,
       inputSchema: {
         type: "object",
         properties: { operationId: operationIdSchema },
@@ -415,6 +462,7 @@ export function buildTools(vault: FsVault): Tool[] {
       name: "vault_get_document_map",
       title: "Vault Get Document Map",
       description: "Return headings, block references, frontmatter fields, links, embeds, and tags for a Markdown note.",
+      annotations: readOnlyAnnotations,
       inputSchema: {
         type: "object",
         properties: { path: mdPath },
@@ -427,6 +475,7 @@ export function buildTools(vault: FsVault): Tool[] {
       name: "search_simple",
       title: "Search Simple",
       description: "Search Markdown note paths and contents with a case-insensitive substring search, returning snippets with context.",
+      annotations: readOnlyAnnotations,
       inputSchema: {
         type: "object",
         properties: {
@@ -443,6 +492,7 @@ export function buildTools(vault: FsVault): Tool[] {
       name: "search_query",
       title: "Search Query",
       description: "Search Markdown notes with structured filters for path glob, tag, frontmatter equality, and content substring. All provided filters are combined with AND.",
+      annotations: readOnlyAnnotations,
       inputSchema: {
         type: "object",
         properties: {
@@ -468,6 +518,7 @@ export function buildTools(vault: FsVault): Tool[] {
       name: "find_asset_references",
       title: "Find Asset References",
       description: "Read-only, conservative asset reference analysis for one or more vault-relative asset paths. Returns evidence, ambiguity, and trashSafety; when the server cannot confidently determine an asset is unused, trashSafety is 'unknown' rather than 'safe'.",
+      annotations: readOnlyAnnotations,
       inputSchema: {
         type: "object",
         properties: {
@@ -492,6 +543,7 @@ export function buildTools(vault: FsVault): Tool[] {
       name: "asset_audit",
       title: "Asset Audit",
       description: "Read-only asset audit for a vault directory. Combines detailed listing with conservative reference analysis; it does not move, delete, or rewrite files. candidateOrphan means no structured reference was found in the scan, while trashSafety is the stricter safe/unsafe/unknown server judgment.",
+      annotations: readOnlyAnnotations,
       inputSchema: {
         type: "object",
         properties: {
@@ -515,6 +567,7 @@ export function buildTools(vault: FsVault): Tool[] {
       name: "tag_list",
       title: "Tag List",
       description: "List all tags across Markdown notes with usage counts.",
+      annotations: readOnlyAnnotations,
       inputSchema: { type: "object", properties: {}, additionalProperties: false },
       handler: async () => ({ tags: await vault.tagList() })
     },
@@ -522,6 +575,7 @@ export function buildTools(vault: FsVault): Tool[] {
       name: "append_to_inbox",
       title: "Append To Inbox",
       description: "Append Markdown content to a note under the configured default inbox directory. Prefer inspecting existing directories and creating a justified directory with vault_create_directory when the content has a clear long-term category. Use this inbox tool for quick capture or genuinely unclassified material; the inbox directory must already exist.",
+      annotations: nonDestructiveWriteAnnotations,
       inputSchema: {
         type: "object",
         properties: {
@@ -532,12 +586,6 @@ export function buildTools(vault: FsVault): Tool[] {
         additionalProperties: false
       },
       outputSchema: appendToInboxOutputSchema,
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: false,
-        idempotentHint: false,
-        openWorldHint: false
-      },
       handler: async (args) => {
         const path = await vault.appendInbox((args.title as string | undefined) ?? "", args.content as string);
         return { message: "OK", path };
@@ -547,6 +595,7 @@ export function buildTools(vault: FsVault): Tool[] {
       name: "vault_upload_image_asset",
       title: "Vault Upload Image Asset",
       description: `Upload a small image asset into an existing vault assets directory and return an Obsidian embed link. This tool never creates asset directories. Only image MIME types are accepted. ${integrityModeDescription}`,
+      annotations: nonDestructiveWriteAnnotations,
       inputSchema: {
         type: "object",
         properties: {
@@ -578,6 +627,7 @@ export function buildTools(vault: FsVault): Tool[] {
       name: "vault_create_note_with_assets",
       title: "Vault Create Note With Assets",
       description: `Create a Markdown note and store small image assets in the existing adjacent assets directory, replacing {{asset:n}} placeholders with Obsidian embeds. Neither the note parent nor asset directory is created implicitly. ${integrityModeDescription}`,
+      annotations: destructiveWriteAnnotations,
       inputSchema: {
         type: "object",
         properties: {
@@ -610,6 +660,7 @@ export function buildTools(vault: FsVault): Tool[] {
       name: "vault_create_external_reference_note",
       title: "Vault Create External Reference Note",
       description: "Create a structured Markdown note inside an existing directory that references external source files without uploading those files into the vault. This tool never creates directories.",
+      annotations: destructiveWriteAnnotations,
       inputSchema: {
         type: "object",
         properties: {
