@@ -39,11 +39,15 @@ export function rpcError(
   return { jsonrpc: "2.0", id, error };
 }
 
+export function structuredContentFor(data: unknown): Record<string, unknown> {
+  return isRecord(data) ? data : { result: data };
+}
+
 export function toolResult(data: unknown): Record<string, unknown> {
   const text = typeof data === "string" ? data : JSON.stringify(data, null, 2);
   return {
     content: [{ type: "text", text }],
-    structuredContent: isRecord(data) ? data : { result: data },
+    structuredContent: structuredContentFor(data),
     isError: false
   };
 }

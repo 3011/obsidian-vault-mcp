@@ -46,9 +46,8 @@ try {
   assert(toolNames.includes("vault_replace_note"));
   assert(toolNames.includes("vault_delete"));
   assert(toolNames.includes("search_simple"));
-  for (const name of ["vault_write", "vault_create_note", "vault_replace_note", "vault_delete", "vault_move", "vault_get_operation", "append_to_inbox"]) {
-    const tool = tools.tools.find((item) => item.name === name);
-    assert(tool?.outputSchema && tool.outputSchema.type === "object", `missing object outputSchema for ${name}`);
+  for (const tool of tools.tools) {
+    assert(tool.outputSchema && tool.outputSchema.type === "object", `missing object outputSchema for ${tool.name}`);
   }
 
   const expectedAnnotations: Record<string, Record<string, boolean>> = {

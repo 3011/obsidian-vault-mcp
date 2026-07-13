@@ -89,6 +89,382 @@ const appendToInboxOutputSchema = {
   additionalProperties: false
 };
 
+const stringArraySchema = { type: "array", items: { type: "string" } };
+
+const fileStatOutputSchema = {
+  type: "object",
+  properties: {
+    ctime: { type: "number" },
+    mtime: { type: "number" },
+    size: { type: "integer", minimum: 0 }
+  },
+  required: ["ctime", "mtime", "size"],
+  additionalProperties: false
+};
+
+const warningOutputSchema = {
+  type: "object",
+  properties: {
+    warningType: { type: "string" },
+    message: { type: "string" },
+    path: { type: "string" },
+    notePath: { type: "string" },
+    line: { type: "integer", minimum: 1 },
+    raw: { type: "string" }
+  },
+  required: ["warningType", "message"],
+  additionalProperties: false
+};
+
+const vaultEntryProperties = {
+  name: { type: "string" },
+  path: { type: "string" },
+  kind: { type: "string", enum: ["file", "directory"] },
+  extension: { type: "string" },
+  mime: { type: "string" },
+  isAttachment: { type: "boolean" },
+  size: { type: "integer", minimum: 0 },
+  mtime: { type: "string" },
+  sha256: { type: ["string", "null"], pattern: "^[0-9a-f]{64}$" }
+};
+
+const vaultEntryOutputSchema = {
+  type: "object",
+  properties: vaultEntryProperties,
+  required: ["name", "path", "kind", "isAttachment"],
+  additionalProperties: false
+};
+
+const vaultListOutputSchema = {
+  type: "object",
+  properties: { files: stringArraySchema },
+  required: ["files"],
+  additionalProperties: false
+};
+
+const vaultListDetailedOutputSchema = {
+  type: "object",
+  properties: {
+    path: { type: "string" },
+    exists: { type: ["boolean", "null"] },
+    kind: { type: "string", enum: ["directory", "file", "missing", "denied", "unknown"] },
+    isEmpty: { type: "boolean" },
+    entryCount: { type: "integer", minimum: 0 },
+    entries: { type: "array", items: vaultEntryOutputSchema },
+    excludedPaths: stringArraySchema,
+    warnings: { type: "array", items: warningOutputSchema },
+    generatedAt: { type: "string" },
+    scanId: { type: "string" }
+  },
+  required: ["path", "exists", "kind", "entries", "excludedPaths", "warnings", "generatedAt", "scanId"],
+  additionalProperties: false
+};
+
+const vaultReadOutputSchema = {
+  type: "object",
+  oneOf: [
+    {
+      type: "object",
+      properties: {
+        path: { type: "string" },
+        content: { type: "string" },
+        frontmatter: { type: "object", additionalProperties: true },
+        tags: stringArraySchema,
+        stat: fileStatOutputSchema,
+        revision: revisionOutputSchema,
+        links: stringArraySchema,
+        embeds: stringArraySchema
+      },
+      required: ["path", "content", "frontmatter", "tags", "stat", "revision", "links", "embeds"],
+      additionalProperties: false
+    },
+    {
+      type: "object",
+      properties: {
+        path: { type: "string" },
+        content: { type: "string" },
+        stat: fileStatOutputSchema,
+        revision: revisionOutputSchema
+      },
+      required: ["path", "content", "stat", "revision"],
+      additionalProperties: false
+    },
+    {
+      type: "object",
+      properties: { result: {} },
+      required: ["result"],
+      additionalProperties: false
+    }
+  ]
+};
+
+const pathMessageOutputSchema = {
+  type: "object",
+  properties: {
+    message: { const: "OK" },
+    path: { type: "string", minLength: 1 }
+  },
+  required: ["message", "path"],
+  additionalProperties: false
+};
+
+const documentMapOutputSchema = {
+  type: "object",
+  properties: {
+    headings: stringArraySchema,
+    blocks: stringArraySchema,
+    frontmatterFields: stringArraySchema,
+    links: stringArraySchema,
+    embeds: stringArraySchema,
+    tags: stringArraySchema
+  },
+  required: ["headings", "blocks", "frontmatterFields", "links", "embeds", "tags"],
+  additionalProperties: false
+};
+
+const searchSimpleOutputSchema = {
+  type: "object",
+  properties: {
+    result: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          filename: { type: "string" },
+          score: { type: "number" },
+          matches: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                match: {
+                  type: "object",
+                  properties: {
+                    start: { type: "integer" },
+                    end: { type: "integer" },
+                    source: { type: "string", enum: ["filename", "content"] }
+                  },
+                  required: ["start", "end", "source"],
+                  additionalProperties: false
+                },
+                context: { type: "string" }
+              },
+              required: ["match", "context"],
+              additionalProperties: false
+            }
+          }
+        },
+        required: ["filename", "score", "matches"],
+        additionalProperties: false
+      }
+    }
+  },
+  required: ["result"],
+  additionalProperties: false
+};
+
+const searchQueryOutputSchema = {
+  type: "object",
+  properties: {
+    result: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          filename: { type: "string" },
+          frontmatter: { type: "object", additionalProperties: true },
+          tags: stringArraySchema,
+          stat: fileStatOutputSchema,
+          links: stringArraySchema,
+          embeds: stringArraySchema
+        },
+        required: ["filename", "frontmatter", "tags", "stat", "links", "embeds"],
+        additionalProperties: false
+      }
+    }
+  },
+  required: ["result"],
+  additionalProperties: false
+};
+
+const assetReferenceOutputSchema = {
+  type: "object",
+  properties: {
+    notePath: { type: "string" },
+    line: { type: "integer", minimum: 1 },
+    raw: { type: "string" },
+    referenceType: { type: "string", enum: ["wikilink_embed", "wikilink_link", "markdown_image", "html_img"] },
+    resolution: { type: "string", enum: ["exact_path", "relative_path", "basename_unique", "basename_ambiguous", "unresolved", "unsupported"] },
+    confidence: { type: "string", enum: ["high", "medium", "low"] }
+  },
+  required: ["notePath", "line", "raw", "referenceType", "resolution", "confidence"],
+  additionalProperties: false
+};
+
+const assetReferenceResultProperties = {
+  assetPath: { type: "string" },
+  exists: { type: "boolean" },
+  basename: { type: "string" },
+  duplicateBasenameCount: { type: "integer", minimum: 0 },
+  referencedByCount: { type: "integer", minimum: 0 },
+  references: { type: "array", items: assetReferenceOutputSchema },
+  ambiguous: { type: "boolean" },
+  unresolvedPotentialMatches: { type: "integer", minimum: 0 },
+  unsupportedPotentialMatches: { type: "integer", minimum: 0 },
+  candidateOrphan: { type: "boolean" },
+  trashSafety: { type: "string", enum: ["safe", "unsafe", "unknown"] },
+  trashSafetyReason: { type: "string" },
+  trashSafetyEvidence: stringArraySchema,
+  warnings: { type: "array", items: warningOutputSchema }
+};
+
+const assetReferenceResultRequired = [
+  "assetPath", "exists", "basename", "duplicateBasenameCount", "referencedByCount", "references",
+  "ambiguous", "unresolvedPotentialMatches", "unsupportedPotentialMatches", "candidateOrphan",
+  "trashSafety", "trashSafetyReason", "trashSafetyEvidence", "warnings"
+];
+
+const assetReferenceResultOutputSchema = {
+  type: "object",
+  properties: assetReferenceResultProperties,
+  required: assetReferenceResultRequired,
+  additionalProperties: false
+};
+
+const scanMetadataProperties = {
+  scanId: { type: "string" },
+  generatedAt: { type: "string" },
+  scanCompleteness: { type: "string", enum: ["full_vault", "scoped", "partial", "failed"] },
+  scanScope: { type: "string" },
+  excludedPaths: stringArraySchema
+};
+
+const findAssetReferencesOutputSchema = {
+  type: "object",
+  properties: {
+    ...scanMetadataProperties,
+    parserCoverage: {
+      type: "object",
+      properties: {
+        supported: stringArraySchema,
+        unsupportedRecognized: stringArraySchema,
+        note: { type: "string" }
+      },
+      required: ["supported", "unsupportedRecognized", "note"],
+      additionalProperties: false
+    },
+    results: { type: "array", items: assetReferenceResultOutputSchema },
+    warnings: { type: "array", items: warningOutputSchema }
+  },
+  required: ["scanId", "generatedAt", "scanCompleteness", "scanScope", "excludedPaths", "parserCoverage", "results", "warnings"],
+  additionalProperties: false
+};
+
+const assetAuditOutputSchema = {
+  type: "object",
+  properties: {
+    root: { type: "string" },
+    rootExists: { type: ["boolean", "null"] },
+    rootKind: { type: "string", enum: ["directory", "file", "missing", "denied", "unknown"] },
+    rootEntryCount: { type: "integer", minimum: 0 },
+    ...scanMetadataProperties,
+    summary: {
+      type: "object",
+      properties: {
+        totalAssets: { type: "integer", minimum: 0 },
+        referenced: { type: "integer", minimum: 0 },
+        candidateOrphans: { type: "integer", minimum: 0 },
+        safeToTrash: { type: "integer", minimum: 0 },
+        unsafe: { type: "integer", minimum: 0 },
+        unknown: { type: "integer", minimum: 0 },
+        ambiguous: { type: "integer", minimum: 0 },
+        warnings: { type: "integer", minimum: 0 }
+      },
+      required: ["totalAssets", "referenced", "candidateOrphans", "safeToTrash", "unsafe", "unknown", "ambiguous", "warnings"],
+      additionalProperties: false
+    },
+    assets: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          ...vaultEntryProperties,
+          ...assetReferenceResultProperties
+        },
+        required: ["name", "path", "kind", "isAttachment", ...assetReferenceResultRequired.filter((field) => field !== "assetPath" && field !== "exists" && field !== "basename")],
+        additionalProperties: false
+      }
+    },
+    warnings: { type: "array", items: warningOutputSchema }
+  },
+  required: ["root", "rootExists", "rootKind", "rootEntryCount", "scanId", "generatedAt", "scanCompleteness", "scanScope", "excludedPaths", "summary", "assets", "warnings"],
+  additionalProperties: false
+};
+
+const tagListOutputSchema = {
+  type: "object",
+  properties: {
+    tags: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          count: { type: "integer", minimum: 0 }
+        },
+        required: ["name", "count"],
+        additionalProperties: false
+      }
+    }
+  },
+  required: ["tags"],
+  additionalProperties: false
+};
+
+const imageIntegrityOutputSchema = {
+  type: "object",
+  properties: {
+    mode: { type: "string", enum: ["optional", "required_for_preserve_original", "required"] },
+    preserveOriginal: { type: "boolean" },
+    expectedSha256Matched: { type: "boolean" },
+    expectedSizeMatched: { type: "boolean" },
+    verified: { type: "boolean" }
+  },
+  required: ["mode", "preserveOriginal", "verified"],
+  additionalProperties: false
+};
+
+const imageAssetOutputSchema = {
+  type: "object",
+  properties: {
+    path: { type: "string" },
+    embed: { type: "string" },
+    bytes: { type: "integer", minimum: 1 },
+    sha256: { type: "string", pattern: "^[0-9a-f]{64}$" },
+    mimeType: { type: "string", enum: ["image/png", "image/jpeg", "image/webp", "image/gif"] },
+    integrity: imageIntegrityOutputSchema
+  },
+  required: ["path", "embed", "bytes", "sha256", "mimeType", "integrity"],
+  additionalProperties: false
+};
+
+const noteWithAssetsOutputSchema = {
+  type: "object",
+  properties: {
+    path: { type: "string" },
+    assets: { type: "array", items: imageAssetOutputSchema }
+  },
+  required: ["path", "assets"],
+  additionalProperties: false
+};
+
+const pathOnlyOutputSchema = {
+  type: "object",
+  properties: { path: { type: "string", minLength: 1 } },
+  required: ["path"],
+  additionalProperties: false
+};
+
 const operationStatusOutputSchema = {
   type: "object",
   properties: {
@@ -149,6 +525,7 @@ export function buildTools(vault: FsVault): Tool[] {
       title: "Vault List",
       description: "List regular files and subdirectories inside a vault directory, including Markdown notes and attachments such as images. Directory entries end with '/'.",
       annotations: readOnlyAnnotations,
+      outputSchema: vaultListOutputSchema,
       inputSchema: {
         type: "object",
         properties: { path: { type: "string", description: "Vault-relative directory path to list. Omit or pass an empty string for the vault root." } },
@@ -161,6 +538,7 @@ export function buildTools(vault: FsVault): Tool[] {
       title: "Vault List Detailed",
       description: "Return structured facts for a vault path without modifying anything. Distinguishes missing paths, files, empty directories, non-empty directories, denied paths, and skipped entries; includes attachment metadata.",
       annotations: readOnlyAnnotations,
+      outputSchema: vaultListDetailedOutputSchema,
       inputSchema: {
         type: "object",
         properties: {
@@ -183,6 +561,7 @@ export function buildTools(vault: FsVault): Tool[] {
       title: "Vault Read",
       description: "Read a Markdown note with metadata, or read a supported non-Markdown text file. Binary files and targeted reads on non-Markdown files are rejected.",
       annotations: readOnlyAnnotations,
+      outputSchema: vaultReadOutputSchema,
       inputSchema: {
         type: "object",
         properties: {
@@ -199,7 +578,8 @@ export function buildTools(vault: FsVault): Tool[] {
         if (typeof args.targetType === "string") options.targetType = args.targetType;
         if (typeof args.target === "string") options.target = args.target;
         if (typeof args.targetDelimiter === "string") options.targetDelimiter = args.targetDelimiter;
-        return vault.read(args.path as string, options);
+        const result = await vault.read(args.path as string, options);
+        return options.targetType !== undefined ? { result } : result;
       }
     },
     {
@@ -290,6 +670,7 @@ export function buildTools(vault: FsVault): Tool[] {
       title: "Vault Create Directory",
       description: "Create exactly one new vault directory after inspecting the existing directory structure and determining that no suitable directory exists. The parent directory must already exist unless creating a new top-level directory, and nested paths must be created one level at a time. The reason must explain why existing directories are unsuitable and what the new directory will contain.",
       annotations: createOnlyAnnotations,
+      outputSchema: pathMessageOutputSchema,
       inputSchema: {
         type: "object",
         properties: {
@@ -463,6 +844,7 @@ export function buildTools(vault: FsVault): Tool[] {
       title: "Vault Get Document Map",
       description: "Return headings, block references, frontmatter fields, links, embeds, and tags for a Markdown note.",
       annotations: readOnlyAnnotations,
+      outputSchema: documentMapOutputSchema,
       inputSchema: {
         type: "object",
         properties: { path: mdPath },
@@ -476,6 +858,7 @@ export function buildTools(vault: FsVault): Tool[] {
       title: "Search Simple",
       description: "Search Markdown note paths and contents with a case-insensitive substring search, returning snippets with context.",
       annotations: readOnlyAnnotations,
+      outputSchema: searchSimpleOutputSchema,
       inputSchema: {
         type: "object",
         properties: {
@@ -493,6 +876,7 @@ export function buildTools(vault: FsVault): Tool[] {
       title: "Search Query",
       description: "Search Markdown notes with structured filters for path glob, tag, frontmatter equality, and content substring. All provided filters are combined with AND.",
       annotations: readOnlyAnnotations,
+      outputSchema: searchQueryOutputSchema,
       inputSchema: {
         type: "object",
         properties: {
@@ -519,6 +903,7 @@ export function buildTools(vault: FsVault): Tool[] {
       title: "Find Asset References",
       description: "Read-only, conservative asset reference analysis for one or more vault-relative asset paths. Returns evidence, ambiguity, and trashSafety; when the server cannot confidently determine an asset is unused, trashSafety is 'unknown' rather than 'safe'.",
       annotations: readOnlyAnnotations,
+      outputSchema: findAssetReferencesOutputSchema,
       inputSchema: {
         type: "object",
         properties: {
@@ -544,6 +929,7 @@ export function buildTools(vault: FsVault): Tool[] {
       title: "Asset Audit",
       description: "Read-only asset audit for a vault directory. Combines detailed listing with conservative reference analysis; it does not move, delete, or rewrite files. candidateOrphan means no structured reference was found in the scan, while trashSafety is the stricter safe/unsafe/unknown server judgment.",
       annotations: readOnlyAnnotations,
+      outputSchema: assetAuditOutputSchema,
       inputSchema: {
         type: "object",
         properties: {
@@ -568,6 +954,7 @@ export function buildTools(vault: FsVault): Tool[] {
       title: "Tag List",
       description: "List all tags across Markdown notes with usage counts.",
       annotations: readOnlyAnnotations,
+      outputSchema: tagListOutputSchema,
       inputSchema: { type: "object", properties: {}, additionalProperties: false },
       handler: async () => ({ tags: await vault.tagList() })
     },
@@ -596,6 +983,7 @@ export function buildTools(vault: FsVault): Tool[] {
       title: "Vault Upload Image Asset",
       description: `Upload a small image asset into an existing vault assets directory and return an Obsidian embed link. This tool never creates asset directories. Only image MIME types are accepted. ${integrityModeDescription}`,
       annotations: nonDestructiveWriteAnnotations,
+      outputSchema: imageAssetOutputSchema,
       inputSchema: {
         type: "object",
         properties: {
@@ -628,6 +1016,7 @@ export function buildTools(vault: FsVault): Tool[] {
       title: "Vault Create Note With Assets",
       description: `Create a Markdown note and store small image assets in the existing adjacent assets directory, replacing {{asset:n}} placeholders with Obsidian embeds. Neither the note parent nor asset directory is created implicitly. ${integrityModeDescription}`,
       annotations: destructiveWriteAnnotations,
+      outputSchema: noteWithAssetsOutputSchema,
       inputSchema: {
         type: "object",
         properties: {
@@ -661,6 +1050,7 @@ export function buildTools(vault: FsVault): Tool[] {
       title: "Vault Create External Reference Note",
       description: "Create a structured Markdown note inside an existing directory that references external source files without uploading those files into the vault. This tool never creates directories.",
       annotations: destructiveWriteAnnotations,
+      outputSchema: pathOnlyOutputSchema,
       inputSchema: {
         type: "object",
         properties: {

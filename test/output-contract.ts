@@ -27,10 +27,29 @@ const badTool: Tool = {
   handler: async () => ({ value: 42 })
 };
 
-const handler = new McpHandler([goodTool, badTool]);
+const arrayOutputSchema = {
+  type: "object",
+  properties: {
+    result: { type: "array", items: { type: "string" } }
+  },
+  required: ["result"],
+  additionalProperties: false
+};
+
+const arrayTool: Tool = {
+  name: "array_output",
+  title: "Array Output",
+  description: "Returns an array normalized into structuredContent.result.",
+  inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  outputSchema: arrayOutputSchema,
+  handler: async () => ["one", "two"]
+};
+
+const handler = new McpHandler([goodTool, badTool, arrayTool]);
 const listed = await handler.handle({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }) as any;
 assert.deepEqual(listed.result.tools[0].outputSchema, outputSchema);
 assert.deepEqual(listed.result.tools[1].outputSchema, outputSchema);
+assert.deepEqual(listed.result.tools[2].outputSchema, arrayOutputSchema);
 
 const good = await handler.handle({
   jsonrpc: "2.0",
@@ -41,9 +60,18 @@ const good = await handler.handle({
 assert.equal(good.result.isError, false);
 assert.equal(good.result.structuredContent.value, "ok");
 
-const bad = await handler.handle({
+const arrayResult = await handler.handle({
   jsonrpc: "2.0",
   id: 3,
+  method: "tools/call",
+  params: { name: "array_output", arguments: {} }
+}) as any;
+assert.equal(arrayResult.result.isError, false);
+assert.deepEqual(arrayResult.result.structuredContent, { result: ["one", "two"] });
+
+const bad = await handler.handle({
+  jsonrpc: "2.0",
+  id: 4,
   method: "tools/call",
   params: { name: "bad_output", arguments: {} }
 }) as any;

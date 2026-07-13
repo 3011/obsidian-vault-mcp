@@ -2,7 +2,7 @@ import { Ajv2020, type ErrorObject, type ValidateFunction } from "ajv/dist/2020.
 import { config } from "../config.js";
 import { normalizeToolError, ToolDomainError } from "./errors.js";
 import type { JsonRpcRequest, Tool } from "./types.js";
-import { rpcError, rpcResult, toolError, toolResult } from "./types.js";
+import { rpcError, rpcResult, structuredContentFor, toolError, toolResult } from "./types.js";
 
 const SUPPORTED_PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2024-11-05"];
 
@@ -91,8 +91,9 @@ export class McpHandler {
       }
       try {
         const data = await tool.handler(rawArguments);
+        const structuredContent = structuredContentFor(data);
         const outputValidator = this.outputValidators.get(name);
-        if (outputValidator && !outputValidator(data)) {
+        if (outputValidator && !outputValidator(structuredContent)) {
           throw new ToolDomainError("INTERNAL_ERROR", `Tool output failed validation: ${name}`, {
             details: {
               tool: name,
