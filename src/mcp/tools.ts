@@ -44,6 +44,16 @@ const moveMutationOutputSchema = mutationOutputSchema(
   ["oldPath", "newPath"]
 );
 
+const appendToInboxOutputSchema = {
+  type: "object",
+  properties: {
+    message: { const: "OK" },
+    path: { type: "string", minLength: 1 }
+  },
+  required: ["message", "path"],
+  additionalProperties: false
+};
+
 const operationStatusOutputSchema = {
   type: "object",
   properties: {
@@ -520,6 +530,13 @@ export function buildTools(vault: FsVault): Tool[] {
         },
         required: ["content"],
         additionalProperties: false
+      },
+      outputSchema: appendToInboxOutputSchema,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false
       },
       handler: async (args) => {
         const path = await vault.appendInbox((args.title as string | undefined) ?? "", args.content as string);

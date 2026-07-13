@@ -7,12 +7,20 @@ export type JsonRpcRequest = {
   params?: Record<string, unknown>;
 };
 
+export type ToolAnnotations = {
+  readOnlyHint?: boolean;
+  destructiveHint?: boolean;
+  idempotentHint?: boolean;
+  openWorldHint?: boolean;
+};
+
 export type Tool = {
   name: string;
   title: string;
   description: string;
   inputSchema: Record<string, unknown>;
   outputSchema?: Record<string, unknown>;
+  annotations?: ToolAnnotations;
   handler: (args: Record<string, unknown>) => Promise<unknown>;
 };
 

@@ -1,6 +1,6 @@
 {
   "name": "obsidian-vault-mcp",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "description": "Headless Obsidian vault MCP server backed by a Markdown filesystem vault.",
   "license": "MIT",
