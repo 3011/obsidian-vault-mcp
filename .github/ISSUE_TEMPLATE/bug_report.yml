@@ -1,0 +1,74 @@
+name: Bug report
+description: Report a reproducible defect in the server, tools, deployment, or documentation
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Remove tokens, credentials, private vault content, and personal data from all examples and logs.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Git tag, image tag, package version, or commit SHA.
+      placeholder: v0.2.3 or sha-...
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - MCP protocol or authentication
+        - Vault read or search
+        - Vault mutation tools
+        - Assets or external references
+        - LiveSync controller
+        - Docker or Kubernetes deployment
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the observed behavior and its impact.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+      description: Provide the smallest safe sequence that reproduces the problem.
+      placeholder: |
+        1. Start the server with ...
+        2. Call ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include OS, Node.js or container runtime, deployment method, and relevant non-secret configuration.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs or output
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Safety checks
+      options:
+        - label: I removed credentials, tokens, private vault content, and personal data.
+          required: true
+        - label: This is not a security vulnerability. Security issues should follow SECURITY.md.
+          required: true

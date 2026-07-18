@@ -6,7 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Community code of conduct, structured bug and feature issue forms, and a pull request template.
+- Dedicated CodeQL and Gitleaks workflows.
+- Monthly grouped Dependabot version updates limited to compatible minor and patch releases.
+- OCI image metadata linking the container package to this repository.
+
 ### Changed
+
+- Updated the security policy to reflect tagged release support.
 
 - Quick Start now builds the container locally so it works before the GHCR package is made public.
 

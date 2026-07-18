@@ -32,3 +32,5 @@ npm run typecheck
 npm test
 docker build -t obsidian-vault-mcp:ci .
 ```
+
+参与本项目即表示同意遵守 [CODE_OF_CONDUCT.zh-CN.md](CODE_OF_CONDUCT.zh-CN.md)。

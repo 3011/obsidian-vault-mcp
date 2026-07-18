@@ -1,0 +1,45 @@
+name: Feature request
+description: Propose a focused improvement with a clear user or operator need
+title: "[Feature]: "
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: Describe the concrete workflow, limitation, or risk that motivates this request.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Explain the desired interface or outcome without requiring a specific implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Note existing tools, workarounds, or smaller options you evaluated.
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Primary scope
+      options:
+        - MCP tool or protocol behavior
+        - Safety or concurrency
+        - Search or indexing
+        - Assets or Markdown handling
+        - LiveSync integration
+        - Deployment or observability
+        - Documentation or contributor experience
+        - Other
+    validations:
+      required: true
+  - type: checkboxes
+    id: compatibility
+    attributes:
+      label: Compatibility
+      options:
+        - label: I considered whether this can remain backward compatible.
+          required: true

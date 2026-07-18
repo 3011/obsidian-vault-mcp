@@ -248,3 +248,7 @@ http://obsidian-vault-mcp:80/mcp
 ## 项目历史
 
 历史实施计划保留在 [`docs/history/`](docs/history/) 中作为设计背景；当前版本变化记录在 [`CHANGELOG.md`](CHANGELOG.md)。
+
+## 参与贡献
+
+提交 Pull Request 前请阅读 [CONTRIBUTING.zh-CN.md](CONTRIBUTING.zh-CN.md)。参与项目需遵守 [CODE_OF_CONDUCT.zh-CN.md](CODE_OF_CONDUCT.zh-CN.md)，安全问题请按照 [SECURITY.zh-CN.md](SECURITY.zh-CN.md) 报告。

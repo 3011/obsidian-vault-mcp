@@ -248,3 +248,7 @@ Runtime validation completed in an isolated deployment profile with LiveSync CLI
 ## Project History
 
 Historical implementation plans are retained under [`docs/history/`](docs/history/) for design context. Current release changes are tracked in [`CHANGELOG.md`](CHANGELOG.md).
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request. Participation is governed by [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md), and vulnerabilities should follow [SECURITY.md](SECURITY.md).

@@ -4,7 +4,11 @@
 
 ## Supported Versions
 
-Security fixes are currently handled on the `main` branch until the project starts publishing tagged releases.
+| Version | Supported |
+| --- | --- |
+| Latest `0.2.x` release | Yes |
+| `main` | Yes |
+| Older releases | No |
 
 ## Reporting a Vulnerability
 

@@ -14,6 +14,11 @@ FROM node:22-alpine
 
 WORKDIR /app
 
+LABEL org.opencontainers.image.title="Obsidian Vault MCP" \
+      org.opencontainers.image.description="Headless MCP server for safely operating a Markdown and Obsidian vault" \
+      org.opencontainers.image.source="https://github.com/3011/obsidian-vault-mcp" \
+      org.opencontainers.image.licenses="MIT"
+
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 COPY --from=build /app/dist/src ./dist/src
