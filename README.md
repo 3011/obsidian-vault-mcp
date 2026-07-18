@@ -12,6 +12,24 @@ livesync-cli daemon -> /data/vault -> obsidian-vault-mcp -> ChatGPT Connector
 
 It does not depend on Obsidian, plugin APIs, command palette, active files, or GUI state.
 
+## Quick Start
+
+Create a vault directory and the default inbox, then start the published container:
+
+```bash
+mkdir -p "$HOME/obsidian-vault/98-Inbox"
+
+export MCP_TOKEN="$(openssl rand -hex 32)"
+docker run --rm --user "$(id -u):$(id -g)" -p 8080:8080 \
+  -e MCP_TOKEN="$MCP_TOKEN" \
+  -v "$HOME/obsidian-vault:/data/vault" \
+  ghcr.io/3011/obsidian-vault-mcp:main
+```
+
+Verify the server at `http://localhost:8080/healthz`, then configure your MCP client with endpoint `http://localhost:8080/mcp` and bearer token `$MCP_TOKEN`.
+
+For Kubernetes and LiveSync deployments, see [`deploy/README.zh-CN.md`](deploy/README.zh-CN.md) and [`docs/deployment-architecture.md`](docs/deployment-architecture.md).
+
 ## Tools
 
 - `vault_list`: list vault files and folders.
@@ -187,7 +205,7 @@ docker build -t ghcr.io/3011/obsidian-vault-mcp:main .
 docker push ghcr.io/3011/obsidian-vault-mcp:main
 ```
 
-GitHub Actions publishes images to `ghcr.io/3011/obsidian-vault-mcp` for pushes to `main` and for git tags. It also publishes immutable `sha-*` tags.
+GitHub Actions publishes `main` and immutable `sha-*` images for pushes to `main`. Tags matching `v*` publish the git tag, semantic-version aliases, `latest`, and a GitHub Release.
 
 ## Kubernetes Example
 
@@ -221,3 +239,7 @@ http://obsidian-vault-mcp:80/mcp
 See `docs/personal-full-access.md` before using this profile with a primary vault.
 
 Runtime validation completed in an isolated deployment profile with LiveSync CLI, CouchDB, OpenAI Secure MCP Tunnel, and ChatGPT Connector. The ChatGPT-side tunnel matrix passed for `vault_list`, `vault_read`, `vault_write`, `vault_append`, `vault_patch`, `vault_delete`, `vault_move`, `search_simple`, `tag_list`, `append_to_inbox`, `vault_upload_image_asset`, `vault_create_note_with_assets`, and `vault_create_external_reference_note`.
+
+## Project History
+
+Historical implementation plans are retained under [`docs/history/`](docs/history/) for design context. Current release changes are tracked in [`CHANGELOG.md`](CHANGELOG.md).

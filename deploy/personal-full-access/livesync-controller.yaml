@@ -25,7 +25,7 @@ spec:
         fsGroup: 1000
       containers:
         - name: obsidian-livesync-controller
-          image: 10.10.0.1:30500/obsidian-livesync-controller:phase1-20260712
+          image: ghcr.io/3011/obsidian-livesync-controller:main
           imagePullPolicy: Always
           env:
             - name: LIVESYNC_DB_PATH

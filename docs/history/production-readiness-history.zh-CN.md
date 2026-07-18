@@ -1,8 +1,9 @@
-# 生产就绪计划
+# 生产就绪建设记录
 
-[English](PRODUCTION_PLAN.md)
+[English](production-readiness-history.md)
 
-当前项目已经可以作为 alpha 阶段的无头文件系统 Obsidian Vault MCP Server 使用。目标是让它足够安全、可维护，可以作为生产级开源项目发布和运行。
+> 本文是历史实施记录，仅用于保留设计背景，不代表项目当前仍处于未完成的发布计划阶段。
+
 
 ## P0：协议兼容性
 

@@ -12,6 +12,24 @@ livesync-cli daemon -> /data/vault -> obsidian-vault-mcp -> ChatGPT Connector
 
 它不依赖 Obsidian GUI、插件 API、命令面板、活动文件或桌面状态。
 
+## 快速开始
+
+创建 vault 目录和默认 inbox，然后启动已发布的容器：
+
+```bash
+mkdir -p "$HOME/obsidian-vault/98-Inbox"
+
+export MCP_TOKEN="$(openssl rand -hex 32)"
+docker run --rm --user "$(id -u):$(id -g)" -p 8080:8080 \
+  -e MCP_TOKEN="$MCP_TOKEN" \
+  -v "$HOME/obsidian-vault:/data/vault" \
+  ghcr.io/3011/obsidian-vault-mcp:main
+```
+
+访问 `http://localhost:8080/healthz` 验证服务，然后在 MCP 客户端中配置端点 `http://localhost:8080/mcp`，Bearer Token 使用 `$MCP_TOKEN`。
+
+Kubernetes 和 LiveSync 部署说明见 [`deploy/README.zh-CN.md`](deploy/README.zh-CN.md) 与 [`docs/deployment-architecture.zh-CN.md`](docs/deployment-architecture.zh-CN.md)。
+
 ## 工具列表
 
 - `vault_list`：列出 vault 文件和目录。
@@ -187,7 +205,7 @@ docker build -t ghcr.io/3011/obsidian-vault-mcp:main .
 docker push ghcr.io/3011/obsidian-vault-mcp:main
 ```
 
-GitHub Actions 会在 push 到 `main` 和 git tag 时发布镜像到 `ghcr.io/3011/obsidian-vault-mcp`，并发布不可变 `sha-*` tag。
+GitHub Actions 会在 push 到 `main` 时发布 `main` 和不可变 `sha-*` 镜像。匹配 `v*` 的 tag 会发布 git tag、语义化版本别名、`latest`，并创建 GitHub Release。
 
 ## Kubernetes 示例
 
@@ -221,3 +239,7 @@ http://obsidian-vault-mcp:80/mcp
 在主 vault 上使用前，请先阅读 `docs/personal-full-access.zh-CN.md`。
 
 运行时验证已在隔离部署 profile 中完成，包含 LiveSync CLI、CouchDB、OpenAI Secure MCP Tunnel 和 ChatGPT Connector。ChatGPT 侧 tunnel 工具矩阵已通过：`vault_list`、`vault_read`、`vault_write`、`vault_append`、`vault_patch`、`vault_delete`、`vault_move`、`search_simple`、`tag_list`、`append_to_inbox`、`vault_upload_image_asset`、`vault_create_note_with_assets`、`vault_create_external_reference_note`。
+
+## 项目历史
+
+历史实施计划保留在 [`docs/history/`](docs/history/) 中作为设计背景；当前版本变化记录在 [`CHANGELOG.md`](CHANGELOG.md)。
