@@ -1,8 +1,9 @@
-# Production Readiness Plan
+# Production Readiness History
 
-[中文文档](PRODUCTION_PLAN.zh-CN.md)
+[中文](production-readiness-history.zh-CN.md)
 
-This project is currently usable as an alpha headless filesystem Obsidian Vault MCP server. The goal is to make it safe to publish and operate as a production-grade open source project.
+> This document is a historical implementation record. It is retained for design context and does not describe the current project status or an unfinished release plan.
+
 
 ## P0: Protocol Compatibility
 
