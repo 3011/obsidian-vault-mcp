@@ -2,6 +2,8 @@
 
 这个目录提供两套 Kubernetes 部署 profile，并且已经按资源类型拆分成多个文件，方便审查、覆盖和迁移到 Kustomize/Helm。
 
+> 示例统一使用 `ghcr.io/3011/...`，不再包含内部 registry 地址。GitHub 个人账号下新发布的 GHCR 包默认为私有；在改为 Public 前，Kubernetes 需要配置 `imagePullSecrets`，或自行构建并替换镜像地址。
+
 LiveSync delete/move 文件复活问题的完整排查和修复记录见：[`docs/livesync-delete-move-wal-report.zh-CN.md`](../docs/livesync-delete-move-wal-report.zh-CN.md)。
 
 ## 目录结构

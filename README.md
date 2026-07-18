@@ -14,16 +14,19 @@ It does not depend on Obsidian, plugin APIs, command palette, active files, or G
 
 ## Quick Start
 
-Create a vault directory and the default inbox, then start the published container:
+Clone the repository, build the image locally, then start the server:
 
 ```bash
-mkdir -p "$HOME/obsidian-vault/98-Inbox"
+git clone https://github.com/3011/obsidian-vault-mcp.git
+cd obsidian-vault-mcp
+docker build -t obsidian-vault-mcp:local .
 
+mkdir -p "$HOME/obsidian-vault/98-Inbox"
 export MCP_TOKEN="$(openssl rand -hex 32)"
 docker run --rm --user "$(id -u):$(id -g)" -p 8080:8080 \
   -e MCP_TOKEN="$MCP_TOKEN" \
   -v "$HOME/obsidian-vault:/data/vault" \
-  ghcr.io/3011/obsidian-vault-mcp:main
+  obsidian-vault-mcp:local
 ```
 
 Verify the server at `http://localhost:8080/healthz`, then configure your MCP client with endpoint `http://localhost:8080/mcp` and bearer token `$MCP_TOKEN`.
@@ -206,6 +209,8 @@ docker push ghcr.io/3011/obsidian-vault-mcp:main
 ```
 
 GitHub Actions publishes `main` and immutable `sha-*` images for pushes to `main`. Tags matching `v*` publish the git tag, semantic-version aliases, `latest`, and a GitHub Release.
+
+> GitHub Container Registry packages under personal accounts are private on first publish. To allow anonymous pulls from `ghcr.io/3011/obsidian-vault-mcp`, change the package visibility to **Public** in GitHub Package settings.
 
 ## Kubernetes Example
 

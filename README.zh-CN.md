@@ -14,16 +14,19 @@ livesync-cli daemon -> /data/vault -> obsidian-vault-mcp -> ChatGPT Connector
 
 ## 快速开始
 
-创建 vault 目录和默认 inbox，然后启动已发布的容器：
+克隆仓库并在本地构建镜像，然后启动服务：
 
 ```bash
-mkdir -p "$HOME/obsidian-vault/98-Inbox"
+git clone https://github.com/3011/obsidian-vault-mcp.git
+cd obsidian-vault-mcp
+docker build -t obsidian-vault-mcp:local .
 
+mkdir -p "$HOME/obsidian-vault/98-Inbox"
 export MCP_TOKEN="$(openssl rand -hex 32)"
 docker run --rm --user "$(id -u):$(id -g)" -p 8080:8080 \
   -e MCP_TOKEN="$MCP_TOKEN" \
   -v "$HOME/obsidian-vault:/data/vault" \
-  ghcr.io/3011/obsidian-vault-mcp:main
+  obsidian-vault-mcp:local
 ```
 
 访问 `http://localhost:8080/healthz` 验证服务，然后在 MCP 客户端中配置端点 `http://localhost:8080/mcp`，Bearer Token 使用 `$MCP_TOKEN`。
@@ -206,6 +209,8 @@ docker push ghcr.io/3011/obsidian-vault-mcp:main
 ```
 
 GitHub Actions 会在 push 到 `main` 时发布 `main` 和不可变 `sha-*` 镜像。匹配 `v*` 的 tag 会发布 git tag、语义化版本别名、`latest`，并创建 GitHub Release。
+
+> GitHub 个人账号下首次发布的 Container Registry 包默认为私有。要允许匿名拉取 `ghcr.io/3011/obsidian-vault-mcp`，需要在 GitHub Package settings 中把可见性改为 **Public**。
 
 ## Kubernetes 示例
 

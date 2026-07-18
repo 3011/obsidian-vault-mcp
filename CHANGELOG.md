@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- Quick Start now builds the container locally so it works before the GHCR package is made public.
+
 ## [0.2.3] - 2026-07-18
 
 ### Added
