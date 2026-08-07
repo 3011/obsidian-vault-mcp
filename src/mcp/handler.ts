@@ -60,7 +60,8 @@ export class McpHandler {
           description: tool.description,
           inputSchema: tool.inputSchema,
           ...(tool.outputSchema !== undefined ? { outputSchema: tool.outputSchema } : {}),
-          ...(tool.annotations !== undefined ? { annotations: tool.annotations } : {})
+          ...(tool.annotations !== undefined ? { annotations: tool.annotations } : {}),
+          ...(tool._meta !== undefined ? { _meta: tool._meta } : {})
         }))
       });
     }

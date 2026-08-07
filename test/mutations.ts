@@ -236,14 +236,6 @@ async function assertDefaultDirectoryValidation(): Promise<void> {
     });
     await assert.rejects(() => missingInbox.init(), /default write directory not found: 98-Inbox/i);
 
-    const missingAssetsRoot = path.join(parent, "missing-assets");
-    await mkdir(path.join(missingAssetsRoot, "98-Inbox"), { recursive: true });
-    const missingAssets = new FsVault(missingAssetsRoot, "98-Inbox", {
-      validateDefaultWriteDir: true,
-      validateDefaultAssetDir: true,
-      backupBeforeWrite: false
-    });
-    await assert.rejects(() => missingAssets.init(), /default asset directory not found: 98-Inbox\/assets/i);
   } finally {
     await rm(parent, { recursive: true, force: true });
   }

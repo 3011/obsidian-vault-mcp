@@ -27,16 +27,8 @@ function tokenFromEnv(): string {
   }
 }
 
-function listEnv(name: string, defaultValue: string[]): string[] {
-  const raw = process.env[name];
-  if (!raw) return defaultValue;
-  return raw.split(",").map((value) => value.trim()).filter(Boolean);
-}
-
-function imageAssetIntegrityModeEnv(): "optional" | "required_for_preserve_original" | "required" {
-  const raw = (process.env.IMAGE_ASSET_INTEGRITY_MODE || "required_for_preserve_original").trim();
-  if (raw === "optional" || raw === "required_for_preserve_original" || raw === "required") return raw;
-  return "required_for_preserve_original";
+function csvEnv(name: string): string[] {
+  return (process.env[name] || "").split(",").map((value) => value.trim()).filter(Boolean);
 }
 
 export type Config = {
@@ -64,11 +56,13 @@ export type Config = {
   enableVaultCreateDirectory: boolean;
   enableAppendToInbox: boolean;
   enableAuditLog: boolean;
-  assetsDirName: string;
-  maxImageAssetBytes: number;
-  allowedImageMimeTypes: string[];
-  imageAssetIntegrityMode: "optional" | "required_for_preserve_original" | "required";
-  enableImageAssets: boolean;
+  enableFileTransfer: boolean;
+  maxFileTransferBytes: number;
+  maxEmbeddedExportBytes: number;
+  fileTransferSpoolDir: string;
+  fileTransferTimeoutSeconds: number;
+  fileImportAllowHttp: boolean;
+  fileImportAllowedHosts: string[];
   enableExternalReferenceNotes: boolean;
   trashDelete: boolean;
   trashDir: string;
@@ -109,11 +103,13 @@ export const config: Config = {
   enableVaultCreateDirectory: boolEnv("ENABLE_VAULT_CREATE_DIRECTORY", true),
   enableAppendToInbox: boolEnv("ENABLE_APPEND_TO_INBOX", true),
   enableAuditLog: boolEnv("ENABLE_AUDIT_LOG", true),
-  assetsDirName: (process.env.ASSETS_DIR_NAME || "assets").replace(/^\/+|\/+$/g, "") || "assets",
-  maxImageAssetBytes: intEnv("MAX_IMAGE_ASSET_BYTES", 10 * 1024 * 1024),
-  allowedImageMimeTypes: listEnv("ALLOWED_IMAGE_MIME_TYPES", ["image/png", "image/jpeg", "image/webp", "image/gif"]),
-  imageAssetIntegrityMode: imageAssetIntegrityModeEnv(),
-  enableImageAssets: boolEnv("ENABLE_IMAGE_ASSETS", true),
+  enableFileTransfer: boolEnv("ENABLE_FILE_TRANSFER", true),
+  maxFileTransferBytes: intEnv("MAX_FILE_TRANSFER_BYTES", 256 * 1024 * 1024),
+  maxEmbeddedExportBytes: Math.min(intEnv("MAX_EMBEDDED_EXPORT_BYTES", 4 * 1024 * 1024), 4 * 1024 * 1024),
+  fileTransferSpoolDir: (process.env.FILE_TRANSFER_SPOOL_DIR || "/tmp/obsidian-vault-mcp-files").trim(),
+  fileTransferTimeoutSeconds: intEnv("FILE_TRANSFER_TIMEOUT_SECONDS", 600),
+  fileImportAllowHttp: boolEnv("FILE_IMPORT_ALLOW_HTTP", false),
+  fileImportAllowedHosts: csvEnv("FILE_IMPORT_ALLOWED_HOSTS"),
   enableExternalReferenceNotes: boolEnv("ENABLE_EXTERNAL_REFERENCE_NOTES", true),
   trashDelete: boolEnv("TRASH_DELETE", true),
   trashDir: (process.env.TRASH_DIR || ".trash").replace(/^\/+|\/+$/g, "") || ".trash",

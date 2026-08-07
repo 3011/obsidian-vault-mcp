@@ -24,12 +24,12 @@ ENABLE_VAULT_PATCH=true
 ENABLE_VAULT_DELETE=true
 ENABLE_VAULT_MOVE=true
 ENABLE_APPEND_TO_INBOX=true
-ENABLE_IMAGE_ASSETS=true
+ENABLE_FILE_TRANSFER=true
+MAX_FILE_TRANSFER_BYTES=268435456
+MAX_EMBEDDED_EXPORT_BYTES=4194304
+FILE_TRANSFER_TIMEOUT_SECONDS=600
+FILE_IMPORT_ALLOWED_HOSTS=.blob.core.windows.net,.oaiusercontent.com
 ENABLE_EXTERNAL_REFERENCE_NOTES=true
-ASSETS_DIR_NAME=assets
-MAX_IMAGE_ASSET_BYTES=10485760
-ALLOWED_IMAGE_MIME_TYPES=image/png,image/jpeg,image/webp,image/gif
-IMAGE_ASSET_INTEGRITY_MODE=required_for_preserve_original
 
 ENABLE_AUDIT_LOG=true
 AUDIT_LOG_PATH=/data/audit/obsidian-vault-mcp.audit.log
@@ -54,8 +54,8 @@ vault_get_document_map
 search_simple
 tag_list
 append_to_inbox
-vault_upload_image_asset
-vault_create_note_with_assets
+vault_import_file
+vault_export_file
 vault_create_external_reference_note
 ```
 
@@ -78,7 +78,7 @@ The Service is intentionally `ClusterIP`; it should only be reachable from insid
 
 ## Operational Notes
 
-This mode is intentionally powerful. The server still blocks path traversal, symlink escape, sensitive vault internals, arbitrary attachment uploads, and non-image asset writes, but GPT can create, overwrite, patch, move, and delete allowed Markdown files and can store small image assets.
+This mode is intentionally powerful. The server still blocks path traversal, symlink escape, sensitive vault internals, implicit parent creation, and unprotected replacement of changed files. GPT can mutate allowed Markdown files and can import/export arbitrary allowed file types through the dedicated bounded file-transfer tools.
 
 Deletes move notes into `.trash/` by default, and existing notes are copied into `.backups/` before write, append, patch, move, and delete operations. Both recovery directories are blocked from MCP note access.
 
@@ -88,9 +88,10 @@ Before using it with a primary vault:
 - keep audit logging enabled;
 - test against a vault copy first;
 - prefer `append_to_inbox` for routine capture workflows;
-- prefer `vault_create_external_reference_note` for PDFs, Word, Excel, zip files, and large log bundles;
-- use `vault_create_note_with_assets` only for screenshots, diagrams, and other small images that belong in the note;
-- use `expectedSha256`, `expectedSize`, and `preserveOriginal=true` when an image must be preserved as exact original bytes;
+- use `vault_import_file` when the actual file should live in the vault; use `expectedSha256` and `expectedSize` when exact source-byte integrity matters;
+- replacing different existing content requires `allowOverwrite=true` plus the current `expectedDestinationSha256`;
+- prefer `vault_create_external_reference_note` for large or externally managed PDFs, Office files, archives, and log bundles that should not be copied into the vault;
+- remember that `vault_export_file` is intentionally hard-capped at 4 MiB per embedded export;
 - review destructive tool calls carefully in the ChatGPT UI when confirmation is shown.
 
-Validated k3s + ChatGPT tunnel coverage includes list, read, write, append, patch, delete, move, search, tag listing, inbox append, image asset upload, note creation with assets, and external reference note creation. Before cutting over a primary vault, still run a restore drill from `.trash/` and `.backups/` and rotate any runtime API key that was exposed during testing.
+Automated coverage includes generic import/export integrity, overwrite protection, size ceilings, symlink/path boundaries, embedded-resource delivery, and SDK compatibility. Re-run the ChatGPT tunnel matrix after deploying a new image. Before cutting over a primary vault, still run a restore drill from `.trash/` and `.backups/` and rotate any runtime API key that was exposed during testing.

@@ -1,7 +1,7 @@
-import { copyFile, mkdir, open, readdir, readFile, rename, rm, rmdir, stat } from "node:fs/promises";
+import { copyFile, lstat, mkdir, open, readdir, readFile, rename, rm, rmdir, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { atomicCreateFile, atomicWriteFile } from "./atomicWrite.js";
+import { atomicCopyFile, atomicCreateFile, atomicWriteFile } from "./atomicWrite.js";
 import { ToolDomainError } from "../mcp/errors.js";
 import { audit } from "./audit.js";
 import { assetAudit, findAssetReferences, vaultListDetailed, type AssetAuditArgs, type FindAssetReferencesArgs, type VaultListDetailedArgs } from "./assetAudit.js";
@@ -11,16 +11,6 @@ import { MutationJournal, type OperationStatus, type PendingMutation } from "./m
 import { getDocumentMap } from "../markdown/documentMap.js";
 import { frontmatterTags, parseFrontmatter } from "../markdown/frontmatter.js";
 import { patchMarkdown, type PatchArgs } from "../markdown/patch.js";
-import { allowedImageExtensions, prepareImageAsset, uniqueAssetFilename, type ImageAssetInput, type ImageAssetIntegrity, type ImageAssetIntegrityMode, type PreparedImageAsset } from "./imageAssets.js";
-
-export type ImageAssetResult = {
-  path: string;
-  embed: string;
-  bytes: number;
-  sha256: string;
-  mimeType: string;
-  integrity: ImageAssetIntegrity;
-};
 
 export type ExternalReference = {
   label: string;
@@ -48,6 +38,21 @@ export type LocalFileMutationResult = {
   revision: FileRevision;
 };
 
+export type ImportedVaultFileResult = {
+  path: string;
+  revision: FileRevision;
+  created: boolean;
+  overwritten: boolean;
+  idempotent: boolean;
+  obsidian: { link: string; embed: string };
+};
+
+export type ExportedVaultFile = {
+  path: string;
+  bytes: Buffer;
+  revision: FileRevision;
+};
+
 export type DeleteMutationResult = {
   path: string;
   operationId?: string;
@@ -62,52 +67,34 @@ export type MoveMutationResult = {
 export class FsVault {
   readonly guard: PathGuard;
   private readonly locks = new FileLocks();
-  private readonly assetsDirName: string;
-  private readonly maxImageAssetBytes: number;
-  private readonly allowedImageMimeTypes: string[];
-  private readonly imageAssetIntegrityMode: ImageAssetIntegrityMode;
   private readonly trashDelete: boolean;
   private readonly trashDir: string;
   private readonly backupBeforeWrite: boolean;
   private readonly backupDir: string;
   private readonly mutationJournal: MutationJournal | undefined;
   private readonly validateDefaultWriteDir: boolean;
-  private readonly validateDefaultAssetDir: boolean;
 
   constructor(root: string, defaultWriteDir: string, options: {
-    assetsDirName?: string;
-    maxImageAssetBytes?: number;
-    allowedImageMimeTypes?: string[];
-    imageAssetIntegrityMode?: ImageAssetIntegrityMode;
     trashDelete?: boolean;
     trashDir?: string;
     backupBeforeWrite?: boolean;
     backupDir?: string;
     mutationJournal?: MutationJournal | undefined;
     validateDefaultWriteDir?: boolean;
-    validateDefaultAssetDir?: boolean;
   } = {}) {
     this.guard = new PathGuard(root, defaultWriteDir);
-    this.assetsDirName = sanitizeDirName(options.assetsDirName || "assets");
-    this.maxImageAssetBytes = options.maxImageAssetBytes || 10 * 1024 * 1024;
-    this.allowedImageMimeTypes = options.allowedImageMimeTypes || ["image/png", "image/jpeg", "image/webp", "image/gif"];
-    this.imageAssetIntegrityMode = options.imageAssetIntegrityMode || "required_for_preserve_original";
     this.trashDelete = options.trashDelete ?? true;
     this.trashDir = sanitizeDirName(options.trashDir || ".trash");
     this.backupBeforeWrite = options.backupBeforeWrite ?? true;
     this.backupDir = sanitizeDirName(options.backupDir || ".backups");
     this.mutationJournal = options.mutationJournal;
     this.validateDefaultWriteDir = options.validateDefaultWriteDir ?? false;
-    this.validateDefaultAssetDir = options.validateDefaultAssetDir ?? false;
   }
 
   async init(): Promise<void> {
     await this.guard.ensureRoot();
     if (this.validateDefaultWriteDir) {
       await this.guard.assertWritableDirectory(this.guard.defaultWriteDir, "default write directory");
-    }
-    if (this.validateDefaultAssetDir) {
-      await this.guard.assertWritableDirectory(`${this.guard.defaultWriteDir}/${this.assetsDirName}`, "default asset directory");
     }
     await this.mutationJournal?.init();
   }
@@ -267,34 +254,103 @@ export class FsVault {
     return relative;
   }
 
-  async uploadImageAsset(input: ImageAssetInput & { dir?: string }): Promise<ImageAssetResult> {
-    const assetDir = this.guard.validateAssetDir(input.dir || `${this.guard.defaultWriteDir}/${this.assetsDirName}`);
-    this.assertAssetDir(assetDir);
-    const asset = prepareImageAsset(input, this.allowedImageMimeTypes, this.maxImageAssetBytes, this.imageAssetIntegrityMode);
-    return this.savePreparedImageAsset(assetDir, asset);
+  async importFileFromPath(
+    destination: string,
+    sourcePath: string,
+    sourceRevision: { sha256: string; size: number },
+    options: { allowOverwrite?: boolean; expectedDestinationSha256?: string } = {}
+  ): Promise<ImportedVaultFileResult> {
+    const relative = this.guard.validateVaultFilePath(destination);
+    const allowOverwrite = options.allowOverwrite === true;
+    const expectedDestinationSha256 = options.expectedDestinationSha256?.toLowerCase();
+    return this.locks.withLock([relative], async () => {
+      await this.guard.assertWritableParent(relative);
+      const absolute = this.guard.resolveCreate(relative);
+      try {
+        const sourceActual = await revisionForLargeFile(sourcePath);
+        if (sourceActual.size !== sourceRevision.size || sourceActual.sha256 !== sourceRevision.sha256.toLowerCase()) {
+          throw new ToolDomainError("CONTENT_CONFLICT", `source file changed before import: ${relative}`, {
+            details: { path: relative, expectedSize: sourceRevision.size, actualSize: sourceActual.size, expectedSha256: sourceRevision.sha256.toLowerCase(), actualSha256: sourceActual.sha256 }
+          });
+        }
+
+        const existing = await revisionForExistingRegularFile(absolute);
+        if (existing && existing.size === sourceActual.size && existing.sha256 === sourceActual.sha256) {
+          await audit("vault_import_file", "success", { path: relative, bytes: existing.size, sha256: existing.sha256, idempotent: true });
+          return importedFileResult(relative, existing, false, false, true);
+        }
+        if (existing && !allowOverwrite) {
+          throw new ToolDomainError("ALREADY_EXISTS", `destination already exists with different content: ${relative}`, {
+            details: { path: relative, actualSha256: existing.sha256, sourceSha256: sourceActual.sha256 }
+          });
+        }
+        if (existing && allowOverwrite && !expectedDestinationSha256) {
+          throw new ToolDomainError("DESTINATION_CONFLICT", `expectedDestinationSha256 is required to overwrite an existing file: ${relative}`, {
+            details: { path: relative, actualSha256: existing.sha256 }
+          });
+        }
+        if (expectedDestinationSha256) {
+          const actualSha256 = existing?.sha256 ?? null;
+          if (actualSha256 !== expectedDestinationSha256) {
+            throw new ToolDomainError("DESTINATION_CONFLICT", `destination revision does not match: ${relative}`, {
+              details: { path: relative, expectedDestinationSha256, actualSha256 }
+            });
+          }
+        }
+
+        if (existing) {
+          const beforeBackup = await revisionForExistingRegularFile(absolute);
+          if (!beforeBackup || beforeBackup.sha256 !== existing.sha256 || beforeBackup.size !== existing.size) {
+            throw new ToolDomainError("DESTINATION_CONFLICT", `destination changed before overwrite: ${relative}`, {
+              details: { path: relative, expectedSha256: existing.sha256, actualSha256: beforeBackup?.sha256 ?? null }
+            });
+          }
+          await this.backupExisting(relative, "vault_import_file");
+          const beforeCommit = await revisionForExistingRegularFile(absolute);
+          if (!beforeCommit || beforeCommit.sha256 !== existing.sha256 || beforeCommit.size !== existing.size) {
+            throw new ToolDomainError("DESTINATION_CONFLICT", `destination changed during overwrite preparation: ${relative}`, {
+              details: { path: relative, expectedSha256: existing.sha256, actualSha256: beforeCommit?.sha256 ?? null }
+            });
+          }
+        }
+        await atomicCopyFile(sourcePath, absolute, existing ? true : false);
+        const committed = await revisionForLargeFile(absolute);
+        if (committed.size !== sourceActual.size || committed.sha256 !== sourceActual.sha256) {
+          throw new ToolDomainError("CONTENT_CONFLICT", `imported file verification failed: ${relative}`, {
+            details: { path: relative, sourceSize: sourceActual.size, committedSize: committed.size, sourceSha256: sourceActual.sha256, committedSha256: committed.sha256 }
+          });
+        }
+        await audit("vault_import_file", "success", { path: relative, bytes: committed.size, sha256: committed.sha256, created: !existing, overwritten: !!existing });
+        return importedFileResult(relative, committed, !existing, !!existing, false);
+      } catch (error) {
+        await audit("vault_import_file", "failure", { path: relative, error: errorMessage(error) });
+        throw error;
+      }
+    });
   }
 
-  async createNoteWithAssets(filePath: string, content: string, assets: ImageAssetInput[]): Promise<{ path: string; assets: ImageAssetResult[] }> {
-    const relative = this.guard.validateFilePath(filePath, { allowMissing: true });
-    const noteDir = path.posix.dirname(relative);
-    const assetDir = noteDir === "." ? this.assetsDirName : `${noteDir}/${this.assetsDirName}`;
-    const prepared = assets.map((asset) => prepareImageAsset(asset, this.allowedImageMimeTypes, this.maxImageAssetBytes, this.imageAssetIntegrityMode));
-    validateAssetPlaceholders(content, prepared.length);
-
+  async exportFile(pathValue: string, maxBytes: number): Promise<ExportedVaultFile> {
+    const relative = this.guard.validateVaultFilePath(pathValue);
     return this.locks.withLock([relative], async () => {
-      const savedAssets: ImageAssetResult[] = [];
       try {
-        await this.guard.assertWritableParent(relative);
-        await this.guard.assertWritableDirectory(assetDir, "asset directory");
-        for (const asset of prepared) savedAssets.push(await this.savePreparedImageAsset(assetDir, asset));
-        const noteContent = renderNoteWithAssets(content, savedAssets);
-        const absolute = this.guard.resolveCreate(relative);
-        await this.backupExisting(relative, "vault_create_note_with_assets");
-        await atomicWriteFile(absolute, noteContent);
-        await audit("vault_create_note_with_assets", "success", { path: relative, assets: savedAssets.map((asset) => asset.path), bytes: Buffer.byteLength(noteContent) });
-        return { path: relative, assets: savedAssets };
+        const absolute = await this.guard.resolveExisting(relative);
+        const info = await stat(absolute);
+        if (info.size > maxBytes) {
+          throw new ToolDomainError("FILE_TOO_LARGE", `file_too_large: ${info.size} > ${maxBytes}`, {
+            details: { path: relative, bytes: info.size, maxBytes }
+          });
+        }
+        const bytes = await readFile(absolute);
+        if (bytes.length !== info.size) {
+          throw new ToolDomainError("CONTENT_CONFLICT", `file changed while exporting: ${relative}`, {
+            details: { path: relative, expectedSize: info.size, actualSize: bytes.length }
+          });
+        }
+        const revision = revisionFromBytes(bytes, info.mtimeMs);
+        await audit("vault_export_file", "success", { path: relative, bytes: revision.size, sha256: revision.sha256 });
+        return { path: relative, bytes, revision };
       } catch (error) {
-        await audit("vault_create_note_with_assets", "failure", { path: relative, assets: savedAssets.map((asset) => asset.path), error: errorMessage(error) });
+        await audit("vault_export_file", "failure", { path: relative, error: errorMessage(error) });
         throw error;
       }
     });
@@ -682,47 +738,6 @@ export class FsVault {
     return [...counts.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([name, count]) => ({ name, count }));
   }
 
-  private async savePreparedImageAsset(assetDir: string, asset: PreparedImageAsset): Promise<ImageAssetResult> {
-    const allowedExtensions = allowedImageExtensions(this.allowedImageMimeTypes);
-    const dir = this.guard.validateAssetDir(assetDir);
-    this.assertAssetDir(dir);
-    await this.guard.assertWritableDirectory(dir, "asset directory");
-    const filename = await uniqueAssetFilename(asset.filename, asset.sha256, async (candidate) => {
-      try {
-        await stat(this.guard.resolveCreate(this.guard.validateAssetPath(`${dir}/${candidate}`, allowedExtensions)));
-        return true;
-      } catch (error: any) {
-        if (error?.code === "ENOENT") return false;
-        throw error;
-      }
-    });
-    const relative = this.guard.validateAssetPath(`${dir}/${filename}`, allowedExtensions);
-    return this.locks.withLock([relative], async () => {
-      try {
-        const absolute = this.guard.resolveCreate(relative);
-        await atomicWriteFile(absolute, asset.bytes);
-        await audit("vault_upload_image_asset", "success", assetAuditDetails(relative, asset));
-        return {
-          path: relative,
-          embed: `![[${relative}]]`,
-          bytes: asset.byteLength,
-          sha256: asset.sha256,
-          mimeType: asset.mimeType,
-          integrity: asset.integrity
-        };
-      } catch (error) {
-        await audit("vault_upload_image_asset", "failure", { ...assetAuditDetails(relative, asset), error: errorMessage(error) });
-        throw error;
-      }
-    });
-  }
-
-  private assertAssetDir(assetDir: string): void {
-    if (path.posix.basename(assetDir) !== this.assetsDirName) {
-      throw new Error(`image assets must be stored in a '${this.assetsDirName}' directory`);
-    }
-  }
-
   private async backupExisting(relative: string, operation: string): Promise<string | undefined> {
     if (!this.backupBeforeWrite) return undefined;
     const source = this.guard.resolveCreate(relative);
@@ -868,36 +883,56 @@ function nodeErrorCode(error: unknown): string | undefined {
   return typeof code === "string" ? code : undefined;
 }
 
+async function revisionForExistingRegularFile(filePath: string): Promise<FileRevision | undefined> {
+  try {
+    const info = await lstat(filePath);
+    if (!info.isFile()) throw new Error("destination exists and is not a regular file");
+    return revisionForLargeFile(filePath);
+  } catch (error) {
+    if (nodeErrorCode(error) === "ENOENT") return undefined;
+    throw error;
+  }
+}
+
+async function revisionForLargeFile(filePath: string): Promise<FileRevision> {
+  const handle = await open(filePath, "r");
+  const hash = createHash("sha256");
+  let size = 0;
+  try {
+    const buffer = Buffer.allocUnsafe(1024 * 1024);
+    let position = 0;
+    while (true) {
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, position);
+      if (bytesRead === 0) break;
+      hash.update(buffer.subarray(0, bytesRead));
+      size += bytesRead;
+      position += bytesRead;
+    }
+    const info = await handle.stat();
+    if (!info.isFile() || info.size !== size) throw new Error("file changed while hashing");
+    return { sha256: hash.digest("hex"), size, mtimeMs: info.mtimeMs };
+  } finally {
+    await handle.close();
+  }
+}
+
+function importedFileResult(relative: string, revision: FileRevision, created: boolean, overwritten: boolean, idempotent: boolean): ImportedVaultFileResult {
+  return {
+    path: relative,
+    revision,
+    created,
+    overwritten,
+    idempotent,
+    obsidian: { link: `[[${relative}]]`, embed: `![[${relative}]]` }
+  };
+}
+
 function sanitizeDirName(name: string): string {
   const clean = name.replace(/^\/+|\/+$/g, "");
   if (!clean || clean.includes("/") || clean.includes("\\") || clean.includes("\0") || clean === "." || clean === "..") {
-    throw new Error("ASSETS_DIR_NAME must be a single relative directory name");
+    throw new Error("directory name must be a single relative path segment");
   }
   return clean;
-}
-
-function validateAssetPlaceholders(content: string, assetCount: number): void {
-  for (const match of content.matchAll(/\{\{asset:(\d+)}}/g)) {
-    const index = Number.parseInt(match[1] ?? "", 10);
-    if (!Number.isInteger(index) || index < 0 || index >= assetCount) throw new Error(`asset placeholder index is out of range: ${match[0]}`);
-  }
-}
-
-function renderNoteWithAssets(content: string, assets: ImageAssetResult[]): string {
-  const referenced = new Set<number>();
-  let next = content.replace(/\{\{asset:(\d+)}}/g, (placeholder, rawIndex) => {
-    const index = Number.parseInt(rawIndex, 10);
-    const asset = assets[index];
-    if (!asset) return placeholder;
-    referenced.add(index);
-    return asset.embed;
-  });
-  const unreferenced = assets.filter((_, index) => !referenced.has(index));
-  if (unreferenced.length > 0) {
-    const separator = next.endsWith("\n") ? "\n" : "\n\n";
-    next += `${separator}## Assets\n\n${unreferenced.map((asset) => asset.embed).join("\n")}\n`;
-  }
-  return next;
 }
 
 function renderExternalReferenceNote(args: {
@@ -965,19 +1000,6 @@ function globToRegExp(pattern: string): RegExp {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function assetAuditDetails(relative: string, asset: PreparedImageAsset): Record<string, unknown> {
-  return {
-    path: relative,
-    bytes: asset.byteLength,
-    sha256: asset.sha256,
-    mimeType: asset.mimeType,
-    expectedSha256: asset.expectedSha256,
-    expectedSize: asset.expectedSize,
-    preserveOriginal: asset.integrity.preserveOriginal,
-    integrityVerified: asset.integrity.verified
-  };
 }
 
 function escapeRegExp(value: string): string {

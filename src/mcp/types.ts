@@ -21,6 +21,7 @@ export type Tool = {
   inputSchema: Record<string, unknown>;
   outputSchema?: Record<string, unknown>;
   annotations?: ToolAnnotations;
+  _meta?: Record<string, unknown>;
   handler: (args: Record<string, unknown>) => Promise<unknown>;
 };
 
@@ -39,11 +40,43 @@ export function rpcError(
   return { jsonrpc: "2.0", id, error };
 }
 
+export type EmbeddedResourceResult = {
+  __embeddedResource: true;
+  structuredContent: Record<string, unknown>;
+  resource: {
+    uri: string;
+    mimeType: string;
+    blob: string;
+  };
+};
+
+export function embeddedResourceResult(
+  structuredContent: Record<string, unknown>,
+  resource: EmbeddedResourceResult["resource"]
+): EmbeddedResourceResult {
+  return { __embeddedResource: true, structuredContent, resource };
+}
+
 export function structuredContentFor(data: unknown): Record<string, unknown> {
+  if (isEmbeddedResourceResult(data)) return data.structuredContent;
   return isRecord(data) ? data : { result: data };
 }
 
 export function toolResult(data: unknown): Record<string, unknown> {
+  if (isEmbeddedResourceResult(data)) {
+    return {
+      content: [
+        { type: "text", text: JSON.stringify(data.structuredContent, null, 2) },
+        {
+          type: "resource",
+          resource: data.resource,
+          annotations: { audience: ["assistant"], priority: 1 }
+        }
+      ],
+      structuredContent: data.structuredContent,
+      isError: false
+    };
+  }
   const text = typeof data === "string" ? data : JSON.stringify(data, null, 2);
   return {
     content: [{ type: "text", text }],
@@ -58,6 +91,10 @@ export function toolError(failure: NormalizedToolFailure): Record<string, unknow
     structuredContent: { ok: false, ...(failure.result ?? {}), error: failure.error },
     isError: true
   };
+}
+
+function isEmbeddedResourceResult(value: unknown): value is EmbeddedResourceResult {
+  return isRecord(value) && value.__embeddedResource === true && isRecord(value.structuredContent) && isRecord(value.resource);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -6,17 +6,12 @@ import { FsVault } from "./vault/FsVault.js";
 import { MutationJournal } from "./vault/mutationJournal.js";
 
 const vault = new FsVault(config.vaultRoot, config.defaultWriteDir, {
-  assetsDirName: config.assetsDirName,
-  maxImageAssetBytes: config.maxImageAssetBytes,
-  allowedImageMimeTypes: config.allowedImageMimeTypes,
-  imageAssetIntegrityMode: config.imageAssetIntegrityMode,
   trashDelete: config.trashDelete,
   trashDir: config.trashDir,
   backupBeforeWrite: config.backupBeforeWrite,
   backupDir: config.backupDir,
   mutationJournal: config.mutationQueueDir ? new MutationJournal(config.mutationQueueDir) : undefined,
-  validateDefaultWriteDir: !config.readOnly && config.enableAppendToInbox,
-  validateDefaultAssetDir: !config.readOnly && config.enableImageAssets
+  validateDefaultWriteDir: !config.readOnly && config.enableAppendToInbox
 });
 await vault.init();
 

@@ -70,8 +70,8 @@ try {
     asset_audit: readOnlyAnnotations(),
     tag_list: readOnlyAnnotations(),
     append_to_inbox: annotations(false, false, false),
-    vault_upload_image_asset: annotations(false, false, false),
-    vault_create_note_with_assets: annotations(false, true, false),
+    vault_import_file: annotations(false, true, false, true),
+    vault_export_file: annotations(true, false, true, true),
     vault_create_external_reference_note: annotations(false, true, false)
   };
   assert.equal(tools.tools.length, Object.keys(expectedAnnotations).length);
@@ -120,8 +120,8 @@ try {
   await rm(root, { recursive: true, force: true });
 }
 
-function annotations(readOnlyHint: boolean, destructiveHint: boolean, idempotentHint: boolean): Record<string, boolean> {
-  return { readOnlyHint, destructiveHint, idempotentHint, openWorldHint: false };
+function annotations(readOnlyHint: boolean, destructiveHint: boolean, idempotentHint: boolean, openWorldHint = false): Record<string, boolean> {
+  return { readOnlyHint, destructiveHint, idempotentHint, openWorldHint };
 }
 
 function readOnlyAnnotations(): Record<string, boolean> {

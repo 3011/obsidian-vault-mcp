@@ -47,6 +47,15 @@ async function writeAndSync(filePath: string, content: string | Uint8Array): Pro
   }
 }
 
+async function writeAll(handle: Awaited<ReturnType<typeof open>>, bytes: Uint8Array): Promise<void> {
+  let offset = 0;
+  while (offset < bytes.byteLength) {
+    const { bytesWritten } = await handle.write(bytes, offset, bytes.byteLength - offset);
+    if (bytesWritten <= 0) throw new Error("file write made no progress");
+    offset += bytesWritten;
+  }
+}
+
 async function fsyncDir(dir: string): Promise<void> {
   const dirHandle = await open(dir, "r");
   try {
@@ -58,4 +67,42 @@ async function fsyncDir(dir: string): Promise<void> {
 
 function tempFilePath(targetPath: string): string {
   return path.join(path.dirname(targetPath), `.${path.basename(targetPath)}.${process.pid}.${randomUUID()}.tmp`);
+}
+
+export async function atomicCopyFile(sourcePath: string, targetPath: string, overwrite: boolean): Promise<void> {
+  const dir = path.dirname(targetPath);
+  const tempPath = tempFilePath(targetPath);
+  let committed = false;
+  try {
+    const source = await open(sourcePath, "r");
+    const temp = await open(tempPath, "wx", 0o600);
+    try {
+      const buffer = Buffer.allocUnsafe(1024 * 1024);
+      let position = 0;
+      while (true) {
+        const { bytesRead } = await source.read(buffer, 0, buffer.length, position);
+        if (bytesRead === 0) break;
+        await writeAll(temp, buffer.subarray(0, bytesRead));
+        position += bytesRead;
+      }
+      await temp.sync();
+    } finally {
+      await temp.close();
+      await source.close();
+    }
+
+    if (overwrite) {
+      await rename(tempPath, targetPath);
+      committed = true;
+    } else {
+      await link(tempPath, targetPath);
+      committed = true;
+      await rm(tempPath, { force: true });
+    }
+    await fsyncDir(dir);
+  } catch (error) {
+    await rm(tempPath, { force: true }).catch(() => undefined);
+    if (committed) await fsyncDir(dir).catch(() => undefined);
+    throw error;
+  }
 }

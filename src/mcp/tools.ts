@@ -1,6 +1,7 @@
 import { config } from "../config.js";
 import { FsVault } from "../vault/FsVault.js";
-import type { Tool, ToolAnnotations } from "./types.js";
+import { embeddedResourceResult, type Tool, type ToolAnnotations } from "./types.js";
+import { openAIFileSchema, VaultFileTransferManager } from "./fileTransfer.js";
 
 const mdPath = { type: "string", description: "Vault-relative Markdown note path ending in .md. The parent directory must already exist; writes to the vault root, absolute paths, and traversal are rejected." };
 const vaultPath = { type: "string", minLength: 1, description: "Vault-relative file path. Absolute paths and traversal are rejected." };
@@ -40,6 +41,20 @@ const destructiveWriteAnnotations: ToolAnnotations = {
   destructiveHint: true,
   idempotentHint: false,
   openWorldHint: false
+};
+
+const fileImportAnnotations: ToolAnnotations = {
+  readOnlyHint: false,
+  destructiveHint: true,
+  idempotentHint: false,
+  openWorldHint: true
+};
+
+const fileExportAnnotations: ToolAnnotations = {
+  readOnlyHint: true,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: true
 };
 
 
@@ -421,40 +436,47 @@ const tagListOutputSchema = {
   additionalProperties: false
 };
 
-const imageIntegrityOutputSchema = {
+const obsidianLinksOutputSchema = {
   type: "object",
   properties: {
-    mode: { type: "string", enum: ["optional", "required_for_preserve_original", "required"] },
-    preserveOriginal: { type: "boolean" },
-    expectedSha256Matched: { type: "boolean" },
-    expectedSizeMatched: { type: "boolean" },
-    verified: { type: "boolean" }
+    link: { type: "string" },
+    embed: { type: "string" }
   },
-  required: ["mode", "preserveOriginal", "verified"],
+  required: ["link", "embed"],
   additionalProperties: false
 };
 
-const imageAssetOutputSchema = {
+const vaultImportFileOutputSchema = {
   type: "object",
   properties: {
     path: { type: "string" },
-    embed: { type: "string" },
-    bytes: { type: "integer", minimum: 1 },
+    bytes: { type: "integer", minimum: 0 },
     sha256: { type: "string", pattern: "^[0-9a-f]{64}$" },
-    mimeType: { type: "string", enum: ["image/png", "image/jpeg", "image/webp", "image/gif"] },
-    integrity: imageIntegrityOutputSchema
+    mimeType: { type: "string" },
+    sourceFileId: { type: "string" },
+    sourceFileName: { type: "string" },
+    verified: { const: true },
+    created: { type: "boolean" },
+    overwritten: { type: "boolean" },
+    idempotent: { type: "boolean" },
+    obsidian: obsidianLinksOutputSchema
   },
-  required: ["path", "embed", "bytes", "sha256", "mimeType", "integrity"],
+  required: ["path", "bytes", "sha256", "mimeType", "sourceFileId", "sourceFileName", "verified", "created", "overwritten", "idempotent", "obsidian"],
   additionalProperties: false
 };
 
-const noteWithAssetsOutputSchema = {
+const vaultExportFileOutputSchema = {
   type: "object",
   properties: {
     path: { type: "string" },
-    assets: { type: "array", items: imageAssetOutputSchema }
+    bytes: { type: "integer", minimum: 0 },
+    sha256: { type: "string", pattern: "^[0-9a-f]{64}$" },
+    mimeType: { type: "string" },
+    fileName: { type: "string" },
+    embedded: { const: true },
+    deliveryMode: { const: "embedded_resource" }
   },
-  required: ["path", "assets"],
+  required: ["path", "bytes", "sha256", "mimeType", "fileName", "embedded", "deliveryMode"],
   additionalProperties: false
 };
 
@@ -502,22 +524,7 @@ const operationStatusOutputSchema = {
 };
 
 export function buildTools(vault: FsVault): Tool[] {
-  const imageIntegrityRequired = config.imageAssetIntegrityMode === "required";
-  const imageAssetRequiredFields = [
-    "filename",
-    "mimeType",
-    "contentBase64",
-    ...(imageIntegrityRequired ? ["expectedSha256", "expectedSize"] : [])
-  ];
-  const expectedSha256Description = imageIntegrityRequired
-    ? "Required expected SHA-256 of the original decoded image bytes."
-    : "Optional expected SHA-256 of the original decoded image bytes. Recommended for lossless/original preservation.";
-  const expectedSizeDescription = imageIntegrityRequired
-    ? "Required expected decoded image byte size."
-    : "Optional expected decoded image byte size. Recommended with expectedSha256 for lossless/original preservation.";
-  const integrityModeDescription = imageIntegrityRequired
-    ? "The server is configured in required integrity mode, so expectedSha256 and expectedSize must be provided for every image."
-    : "Integrity fields are optional unless preserveOriginal requires them under the configured integrity mode.";
+  const fileTransfer = new VaultFileTransferManager(vault);
 
   const tools: Tool[] = [
     {
@@ -979,71 +986,56 @@ export function buildTools(vault: FsVault): Tool[] {
       }
     },
     {
-      name: "vault_upload_image_asset",
-      title: "Vault Upload Image Asset",
-      description: `Upload a small image asset into an existing vault assets directory and return an Obsidian embed link. This tool never creates asset directories. Only image MIME types are accepted. ${integrityModeDescription}`,
-      annotations: nonDestructiveWriteAnnotations,
-      outputSchema: imageAssetOutputSchema,
+      name: "vault_import_file",
+      title: "Vault Import File",
+      description: "Transfer one host-provided file into an existing directory in the Obsidian vault. The destination may be any allowed vault-relative regular-file path; MIME type is metadata only and no file-type whitelist is applied. Directories are never created implicitly. The server verifies size and SHA-256 before and after the atomic commit. An identical existing destination is an idempotent success; replacing different content requires allowOverwrite=true and expectedDestinationSha256.",
+      annotations: fileImportAnnotations,
+      _meta: {
+        "openai/fileParams": ["file"],
+        "openai/toolInvocation/invoking": "Importing file into Obsidian vault",
+        "openai/toolInvocation/invoked": "File imported and verified"
+      },
+      outputSchema: vaultImportFileOutputSchema,
+      inputSchema: {
+        type: "object",
+        $defs: { OpenAIFile: openAIFileSchema() },
+        properties: {
+          file: { $ref: "#/$defs/OpenAIFile", description: "File attached to or generated by the current host. ChatGPT replaces this value with an authorized temporary file reference." },
+          destination: { type: "string", minLength: 1, description: "Vault-relative destination file path. The parent directory must already exist; vault-root writes, absolute paths, traversal, hidden internal directories, and symlink targets are rejected." },
+          expectedSha256: { type: "string", pattern: "^[0-9a-fA-F]{64}$", description: "Optional SHA-256 of the source file for end-to-end integrity verification." },
+          expectedSize: { type: "integer", minimum: 0, description: "Optional expected source byte size for end-to-end integrity verification." },
+          allowOverwrite: { type: "boolean", default: false, description: "Set true to permit replacing an existing regular file with different content. An identical existing file is always treated as idempotent success." },
+          expectedDestinationSha256: { type: "string", pattern: "^[0-9a-fA-F]{64}$", description: "Required when allowOverwrite=true and different content already exists. Protects against overwriting a destination revision the caller has not inspected." }
+        },
+        required: ["file", "destination"],
+        additionalProperties: false
+      },
+      handler: async (args) => fileTransfer.importFile(args)
+    },
+    {
+      name: "vault_export_file",
+      title: "Vault Export File",
+      description: "Export one allowed regular file from the Obsidian vault as an embedded MCP binary resource for host-side materialization. The default and hard maximum embedded payload is 4 MiB (4,194,304 bytes); oversized files are rejected rather than truncated, and there is no public-URL fallback. Any allowed file type can be exported.",
+      annotations: fileExportAnnotations,
+      _meta: {
+        "openai/toolInvocation/invoking": "Exporting file from Obsidian vault",
+        "openai/toolInvocation/invoked": "Vault file embedded and verified"
+      },
+      outputSchema: vaultExportFileOutputSchema,
       inputSchema: {
         type: "object",
         properties: {
-          filename: { type: "string", description: "Original image filename. The extension must match the MIME type." },
-          mimeType: { type: "string", enum: ["image/png", "image/jpeg", "image/webp", "image/gif"], description: "Image MIME type for the decoded bytes." },
-          contentBase64: { type: "string", description: "Base64-encoded image bytes." },
-          expectedSha256: { type: "string", description: expectedSha256Description },
-          expectedSize: { type: "integer", minimum: 1, description: expectedSizeDescription },
-          preserveOriginal: { type: "boolean", description: "Set true when the upload must preserve original bytes; this requires expectedSha256 and expectedSize in the default integrity mode." },
-          dir: { type: "string", description: "Optional vault-relative asset directory. Defaults to the inbox assets directory and must be an allowed assets path." }
+          path: { type: "string", minLength: 1, description: "Vault-relative regular-file path to export. Absolute paths, traversal, hidden internal directories, and symlinks are rejected." },
+          fileName: { type: "string", minLength: 1, description: "Optional safe output filename used when the host materializes the embedded resource. Defaults to the vault file basename." },
+          maxBytes: { type: "integer", minimum: 1, description: "Optional per-call size ceiling. It cannot exceed the server's embedded-export limit and never causes truncation." }
         },
-        required: imageAssetRequiredFields,
+        required: ["path"],
         additionalProperties: false
       },
       handler: async (args) => {
-        const input: { filename: string; mimeType: string; contentBase64: string; expectedSha256?: string; expectedSize?: number; preserveOriginal?: boolean; dir?: string } = {
-          filename: args.filename as string,
-          mimeType: args.mimeType as string,
-          contentBase64: args.contentBase64 as string
-        };
-        if (typeof args.expectedSha256 === "string") input.expectedSha256 = args.expectedSha256;
-        if (typeof args.expectedSize === "number") input.expectedSize = args.expectedSize;
-        if (typeof args.preserveOriginal === "boolean") input.preserveOriginal = args.preserveOriginal;
-        if (typeof args.dir === "string") input.dir = args.dir;
-        return vault.uploadImageAsset(input);
+        const exported = await fileTransfer.exportFile(args);
+        return embeddedResourceResult(exported.result, exported.resource);
       }
-    },
-    {
-      name: "vault_create_note_with_assets",
-      title: "Vault Create Note With Assets",
-      description: `Create a Markdown note and store small image assets in the existing adjacent assets directory, replacing {{asset:n}} placeholders with Obsidian embeds. Neither the note parent nor asset directory is created implicitly. ${integrityModeDescription}`,
-      annotations: destructiveWriteAnnotations,
-      outputSchema: noteWithAssetsOutputSchema,
-      inputSchema: {
-        type: "object",
-        properties: {
-          path: mdPath,
-          content: { type: "string", description: "Markdown content. Use placeholders like {{asset:0}} to embed uploaded assets by index." },
-          assets: {
-            type: "array",
-            description: "Image assets to upload beside the note. Asset indexes correspond to {{asset:n}} placeholders in content.",
-            items: {
-              type: "object",
-              properties: {
-                filename: { type: "string", description: "Original image filename. The extension must match the MIME type." },
-                mimeType: { type: "string", enum: ["image/png", "image/jpeg", "image/webp", "image/gif"], description: "Image MIME type for the decoded bytes." },
-                contentBase64: { type: "string", description: "Base64-encoded image bytes." },
-                expectedSha256: { type: "string", description: expectedSha256Description },
-                expectedSize: { type: "integer", minimum: 1, description: expectedSizeDescription },
-                preserveOriginal: { type: "boolean", description: "Set true when the upload must preserve original bytes; this requires expectedSha256 and expectedSize in the default integrity mode." }
-              },
-              required: imageAssetRequiredFields,
-              additionalProperties: false
-            }
-          }
-        },
-        required: ["path", "content", "assets"],
-        additionalProperties: false
-      },
-      handler: async (args) => vault.createNoteWithAssets(args.path as string, args.content as string, parseImageAssets(args.assets))
     },
     {
       name: "vault_create_external_reference_note",
@@ -1162,8 +1154,7 @@ function toolEnabled(name: string): boolean {
     if (name === "vault_move") return config.enableVaultMove;
     if (name === "vault_create_directory") return config.enableVaultCreateDirectory;
     if (name === "append_to_inbox") return config.enableAppendToInbox;
-    if (name === "vault_upload_image_asset") return config.enableImageAssets;
-    if (name === "vault_create_note_with_assets") return config.enableImageAssets;
+    if (name === "vault_import_file" || name === "vault_export_file") return config.enableFileTransfer;
     if (name === "vault_create_external_reference_note") return config.enableExternalReferenceNotes;
     return true;
   }
@@ -1178,27 +1169,9 @@ function toolEnabled(name: string): boolean {
     "vault_move",
     "vault_create_directory",
     "append_to_inbox",
-    "vault_upload_image_asset",
-    "vault_create_note_with_assets",
+    "vault_import_file",
     "vault_create_external_reference_note"
   ].includes(name);
-}
-
-function parseImageAssets(value: unknown): Array<{ filename: string; mimeType: string; contentBase64: string; expectedSha256?: string; expectedSize?: number; preserveOriginal?: boolean }> {
-  if (!Array.isArray(value)) throw new Error("assets must be an array");
-  return value.map((item, index) => {
-    if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error(`assets[${index}] must be an object`);
-    const record = item as Record<string, unknown>;
-    const parsed: { filename: string; mimeType: string; contentBase64: string; expectedSha256?: string; expectedSize?: number; preserveOriginal?: boolean } = {
-      filename: record.filename as string,
-      mimeType: record.mimeType as string,
-      contentBase64: record.contentBase64 as string
-    };
-    if (typeof record.expectedSha256 === "string") parsed.expectedSha256 = record.expectedSha256;
-    if (typeof record.expectedSize === "number") parsed.expectedSize = record.expectedSize;
-    if (typeof record.preserveOriginal === "boolean") parsed.preserveOriginal = record.preserveOriginal;
-    return parsed;
-  });
 }
 
 function parseExternalReferences(value: unknown): Array<{ label: string; location: string; type?: string; note?: string }> {

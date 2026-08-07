@@ -231,8 +231,8 @@ async function testToolDiscovery(port: number): Promise<void> {
     "asset_audit",
     "tag_list",
     "append_to_inbox",
-    "vault_upload_image_asset",
-    "vault_create_note_with_assets",
+    "vault_import_file",
+    "vault_export_file",
     "vault_create_external_reference_note"
   ]) {
     assert(names.includes(expected), `missing tool ${expected}`);
@@ -533,22 +533,6 @@ async function testDirectoryPolicy(port: number): Promise<void> {
   assert.match(await readFile(path.join(vault, "Projects", "move-policy-source.md"), "utf8"), /move policy/);
   await assert.rejects(() => stat(path.join(vault, "Projects", "Missing-Destination")), /ENOENT/);
 
-  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).toString("base64");
-  await expectToolError(port, "vault_upload_image_asset", {
-    filename: "missing-dir.png",
-    mimeType: "image/png",
-    contentBase64: png,
-    dir: "Projects/Missing/assets"
-  }, /asset directory not found/i);
-  await assert.rejects(() => stat(path.join(vault, "Projects", "Missing")), /ENOENT/);
-
-  await expectToolError(port, "vault_create_note_with_assets", {
-    path: "Projects/NoAssets/note.md",
-    content: "{{asset:0}}",
-    assets: [{ filename: "image.png", mimeType: "image/png", contentBase64: png }]
-  }, /asset directory not found: Projects\/NoAssets\/assets/i);
-  await assert.rejects(() => stat(path.join(vault, "Projects", "NoAssets", "note.md")), /ENOENT/);
-
   await expectToolError(port, "vault_create_external_reference_note", {
     path: "Projects/Missing-References/reference.md",
     title: "Reference",
@@ -715,8 +699,8 @@ async function testReadOnlyMode(): Promise<void> {
     assert(!names.includes("vault_write"));
     assert(!names.includes("vault_create_directory"));
     assert(!names.includes("vault_delete"));
-    assert(!names.includes("vault_upload_image_asset"));
-    assert(!names.includes("vault_create_note_with_assets"));
+    assert(!names.includes("vault_import_file"));
+    assert(names.includes("vault_export_file"));
     assert(!names.includes("vault_create_external_reference_note"));
     const response = await rpc(readOnlyPort, { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "vault_write", arguments: { path: "98-Inbox/nope.md", content: "nope" } } });
     assert.equal(response.error?.code, -32602);

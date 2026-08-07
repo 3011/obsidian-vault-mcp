@@ -53,8 +53,8 @@ Kubernetes 和 LiveSync 部署说明见 [`deploy/README.zh-CN.md`](deploy/README
 - `asset_audit`：只读目录级附件审计，组合详细列表和引用分析结果。
 - `tag_list`：列出 tags 和计数，包含 nested tag 的父级计数。
 - `append_to_inbox`：追加内容到默认 inbox 目录下的笔记。
-- `vault_upload_image_asset`：上传小型图片资产，并返回 Obsidian embed 链接。
-- `vault_create_note_with_assets`：创建 Markdown 笔记，同时把图片资产保存到笔记旁边。
+- `vault_import_file`：把 Host 提供的任意文件传入允许的 Vault 相对路径，并执行大小/SHA-256 校验与受保护覆盖。
+- `vault_export_file`：把允许的 Vault 文件作为 embedded MCP 二进制 resource 返回给 Host 实体化。
 - `vault_create_external_reference_note`：创建外部材料引用笔记，不上传原始文件。
 
 破坏性工具是可以启用的，因为该项目支持个人全权限 tunnel 场景。但服务仍会阻止绝对路径、`..`、symlink escape、临时文件和敏感目录，例如 `.obsidian/`、`.livesync/`、`.git/`、`.trash/`、`node_modules/`。
@@ -71,9 +71,9 @@ Kubernetes 和 LiveSync 部署说明见 [`deploy/README.zh-CN.md`](deploy/README
 - duplicate heading path 当前遵循 `markdown-patch` 的 map 行为：后匹配的 heading 会胜出。使用 `vault_patch` 时建议保持 heading path 唯一，或传入更具体的 nested path。
 - `vault_delete` 支持删除 vault 文件和空目录，非空目录会被拒绝。配置 WAL 的文件删除返回 `operationId`；空目录删除或未配置 WAL 时同步完成且不生成临时 ID。
 - `vault_move` 支持 vault 文件移动，destination 以 `/` 结尾表示目标目录，并支持可选 overwrite。overwrite 直接使用原子 rename，不再预先删除目标。配置 WAL 时返回 `operationId`，可用 `vault_get_operation` 查询。
-- `vault_upload_image_asset` 只接受 PNG、JPEG、WebP、GIF，会校验 MIME、扩展名、大小、基础 magic bytes，并要求目标目录名为 `assets`。
-- `vault_upload_image_asset` 和 `vault_create_note_with_assets` 支持可选 `expectedSha256`、`expectedSize`、`preserveOriginal` 字段。需要证明原始字节无损保存时建议使用这些字段。
-- `vault_create_note_with_assets` 把图片保存到 note-local `assets/` 目录，并把 `{{asset:n}}` 占位符替换为 Obsidian embed。
+- `vault_import_file` 不做 MIME 白名单限制。Host 授权的源文件会流式写入受限 spool，可选校验 `expectedSha256`/`expectedSize`，随后以原始字节原子提交到已有 Vault 目录。
+- 覆盖不同内容时必须同时提供 `allowOverwrite=true` 和 `expectedDestinationSha256`；内容完全一致则视为幂等成功。开启 `BACKUP_BEFORE_WRITE=true` 时，覆盖前仍会备份旧文件。
+- `vault_export_file` 返回 embedded MCP resource，并核对 SHA-256/大小。embedded export 硬上限为 4 MiB；超限直接失败，不截断，也不回退到公网 URL。
 - `vault_create_external_reference_note` 用于 NAS、云盘、工单、PDF、Word、Excel、zip、日志包等不应该进入 vault 的原始材料。
 - `search_simple` 按文件返回所有匹配和上下文。
 - `search_query` 按 path glob、tag、frontmatter 等值和内容子串过滤 Markdown 文件。
@@ -87,24 +87,33 @@ Kubernetes 和 LiveSync 部署说明见 [`deploy/README.zh-CN.md`](deploy/README
 - `remote` 表示 Controller 完成 LiveSync 同步并通过同步后的 `livesync-cli info` 状态检查，不表示直接读取 CouchDB revision。
 - `OPERATION_NOT_FOUND` 也可能表示记录已经超过保留期限或 WAL 存储不可用。
 
-## 图片完整性
+## 文件传输
 
-日常截图可以只传 `filename`、`mimeType` 和 `contentBase64`。服务端会返回解码后的 `bytes`、`sha256`、`mimeType` 和 `integrity` 对象。
+`vault_import_file` 使用 Host 文件参数通道，而不是把 Base64 塞进普通 MCP 参数。在 ChatGPT 中，`tools/list` 会暴露 `_meta["openai/fileParams"] = ["file"]`，由 ChatGPT 提供授权的临时文件引用。服务端流式下载到受限 spool，计算 SHA-256 和字节数，再以原始字节提交到 Vault。
 
-需要原始文件无损保存时，调用方应该传入：
+完整性敏感场景建议提供：
 
 ```json
 {
-  "filename": "original.png",
-  "mimeType": "image/png",
-  "contentBase64": "...",
-  "expectedSha256": "1f3373db406b302e25912db5f23a01777a53f6aba588fcd06846a7d32db9411b",
-  "expectedSize": 91353,
-  "preserveOriginal": true
+  "file": "<host file>",
+  "destination": "Projects/assets/original.pdf",
+  "expectedSha256": "<64 位十六进制>",
+  "expectedSize": 91353
 }
 ```
 
-默认 `IMAGE_ASSET_INTEGRITY_MODE=required_for_preserve_original`。此模式下，只要 `preserveOriginal=true`，就必须提供 `expectedSha256` 和 `expectedSize`；任一值不匹配都会在写入前拒绝。
+覆盖已有不同内容时额外要求：
+
+```json
+{
+  "file": "<host file>",
+  "destination": "Projects/assets/original.pdf",
+  "allowOverwrite": true,
+  "expectedDestinationSha256": "<当前目标文件 SHA-256>"
+}
+```
+
+`vault_export_file` 返回 embedded MCP 二进制 resource。由于 MCP `blob` 在协议层使用 Base64，且 Host 实体化存在实际大小边界，导出硬上限为 4 MiB；不会提供 resource-link/公网 URL 回退。
 
 ## 运行
 
@@ -131,7 +140,7 @@ MCP_TOKEN=change-me VAULT_ROOT=/tmp/vault npm start
 | `VAULT_ROOT` | `/data/vault` | Markdown vault 根目录。 |
 | `MUTATION_QUEUE_DIR` | empty | 可选的 LiveSync delete/move mutation intent WAL 绝对路径，不能位于 `VAULT_ROOT` 内。 |
 | `DEFAULT_WRITE_DIR` | `98-Inbox` | `append_to_inbox` 使用的现有 Inbox 目录；工具启用时若目录不存在，服务启动失败。 |
-| `MAX_REQUEST_BYTES` | `16777216` | JSON 请求体大小限制，需要大于 base64 图片资产大小。 |
+| `MAX_REQUEST_BYTES` | `16777216` | JSON 请求体大小限制；文件字节不再放入普通工具参数。 |
 | `READ_ONLY` | `false` | 为 true 时隐藏所有 mutating tools。 |
 | `ENABLE_VAULT_WRITE` | `true` | 暴露 `vault_write`。 |
 | `ENABLE_VAULT_APPEND` | `true` | 暴露 `vault_append`。 |
@@ -140,12 +149,14 @@ MCP_TOKEN=change-me VAULT_ROOT=/tmp/vault npm start
 | `ENABLE_VAULT_MOVE` | `true` | 暴露 `vault_move`。 |
 | `ENABLE_VAULT_CREATE_DIRECTORY` | `true` | 暴露受控的单级目录创建能力。 |
 | `ENABLE_APPEND_TO_INBOX` | `true` | 暴露 `append_to_inbox`。 |
-| `ENABLE_IMAGE_ASSETS` | `true` | 暴露图片资产上传和图文笔记工具。 |
+| `ENABLE_FILE_TRANSFER` | `true` | 暴露 `vault_import_file` 与 `vault_export_file`；`READ_ONLY=true` 时隐藏 import，但保留 export。 |
+| `MAX_FILE_TRANSFER_BYTES` | `268435456` | 导入文件最大大小，默认 256 MiB。 |
+| `MAX_EMBEDDED_EXPORT_BYTES` | `4194304` | embedded export 上限；即使配置更大也硬限制为 4 MiB。 |
+| `FILE_TRANSFER_SPOOL_DIR` | `/tmp/obsidian-vault-mcp-files` | 入站文件临时 spool 目录。 |
+| `FILE_TRANSFER_TIMEOUT_SECONDS` | `600` | 源文件下载端到端超时。 |
+| `FILE_IMPORT_ALLOWED_HOSTS` | empty | 可选下载 Host 白名单，支持 `.blob.core.windows.net` 这类后缀规则；留空允许任意 HTTPS Host。 |
+| `FILE_IMPORT_ALLOW_HTTP` | `false` | 是否允许 HTTP 源 URL，仅建议本地测试使用。 |
 | `ENABLE_EXTERNAL_REFERENCE_NOTES` | `true` | 暴露外部引用笔记创建工具。 |
-| `ASSETS_DIR_NAME` | `assets` | note-local 图片资产目录名。 |
-| `MAX_IMAGE_ASSET_BYTES` | `10485760` | 图片资产解码后最大字节数。 |
-| `ALLOWED_IMAGE_MIME_TYPES` | `image/png,image/jpeg,image/webp,image/gif` | 图片 MIME allowlist，逗号分隔。 |
-| `IMAGE_ASSET_INTEGRITY_MODE` | `required_for_preserve_original` | 图片完整性策略：`optional`、`required_for_preserve_original` 或 `required`。 |
 | `ENABLE_AUDIT_LOG` | `true` | 把 mutating operations 记录为 JSON。 |
 | `AUDIT_LOG_PATH` | empty | 可选 JSONL 审计日志文件路径；为空时输出到 stdout。 |
 | `TRASH_DELETE` | `true` | 删除时把 vault 文件移动到 trash 目录，而不是永久删除。 |
@@ -243,7 +254,7 @@ http://obsidian-vault-mcp:80/mcp
 
 在主 vault 上使用前，请先阅读 `docs/personal-full-access.zh-CN.md`。
 
-运行时验证已在隔离部署 profile 中完成，包含 LiveSync CLI、CouchDB、OpenAI Secure MCP Tunnel 和 ChatGPT Connector。ChatGPT 侧 tunnel 工具矩阵已通过：`vault_list`、`vault_read`、`vault_write`、`vault_append`、`vault_patch`、`vault_delete`、`vault_move`、`search_simple`、`tag_list`、`append_to_inbox`、`vault_upload_image_asset`、`vault_create_note_with_assets`、`vault_create_external_reference_note`。
+通用文件传输路径已由自动化测试覆盖：import/export 完整性、覆盖保护、大小限制、路径/符号链接边界、embedded resource 与 SDK 兼容性。部署新镜像后应重新跑一次 ChatGPT tunnel 实测矩阵。
 
 ## 项目历史
 

@@ -24,12 +24,12 @@ ENABLE_VAULT_PATCH=true
 ENABLE_VAULT_DELETE=true
 ENABLE_VAULT_MOVE=true
 ENABLE_APPEND_TO_INBOX=true
-ENABLE_IMAGE_ASSETS=true
+ENABLE_FILE_TRANSFER=true
+MAX_FILE_TRANSFER_BYTES=268435456
+MAX_EMBEDDED_EXPORT_BYTES=4194304
+FILE_TRANSFER_TIMEOUT_SECONDS=600
+FILE_IMPORT_ALLOWED_HOSTS=.blob.core.windows.net,.oaiusercontent.com
 ENABLE_EXTERNAL_REFERENCE_NOTES=true
-ASSETS_DIR_NAME=assets
-MAX_IMAGE_ASSET_BYTES=10485760
-ALLOWED_IMAGE_MIME_TYPES=image/png,image/jpeg,image/webp,image/gif
-IMAGE_ASSET_INTEGRITY_MODE=required_for_preserve_original
 
 ENABLE_AUDIT_LOG=true
 AUDIT_LOG_PATH=/data/audit/obsidian-vault-mcp.audit.log
@@ -54,8 +54,8 @@ vault_get_document_map
 search_simple
 tag_list
 append_to_inbox
-vault_upload_image_asset
-vault_create_note_with_assets
+vault_import_file
+vault_export_file
 vault_create_external_reference_note
 ```
 
@@ -78,7 +78,7 @@ Service 故意使用 `ClusterIP`，只应该在集群内部访问。
 
 ## 运维注意事项
 
-这个模式权限很高。服务仍会阻止路径穿越、symlink 逃逸、敏感 vault 内部目录、任意附件上传和非图片资产写入，但 GPT 可以创建、覆盖、patch、移动和删除允许范围内的 Markdown 文件，也可以保存小型图片资产。
+这个模式权限很高。服务仍会阻止路径穿越、symlink 逃逸、敏感 vault 内部目录、隐式创建父目录，以及未受保护地覆盖已变化文件。GPT 可以操作允许范围内的 Markdown 文件，也可以通过专用的受限文件传输工具导入/导出任意允许的文件类型。
 
 默认情况下，删除会移动到 `.trash/`，并且在 write、append、patch、move、delete 前会把已有笔记复制到 `.backups/`。这两个恢复目录都会被 MCP note 访问逻辑屏蔽。
 
@@ -88,9 +88,10 @@ Service 故意使用 `ClusterIP`，只应该在集群内部访问。
 - 保持审计日志开启；
 - 先在 vault 副本上测试；
 - 日常捕获优先用 `append_to_inbox`；
-- PDF、Word、Excel、zip、大日志包优先用 `vault_create_external_reference_note` 只记录引用；
-- 只有截图、架构图等小图片确实属于笔记内容时，才用 `vault_create_note_with_assets`；
-- 图片必须作为原始字节无损保存时，使用 `expectedSha256`、`expectedSize` 和 `preserveOriginal=true`；
+- 实际文件需要进入 Vault 时使用 `vault_import_file`；要求原始字节严格一致时同时提供 `expectedSha256` 和 `expectedSize`；
+- 覆盖已有不同内容时必须同时提供 `allowOverwrite=true` 和当前目标的 `expectedDestinationSha256`；
+- PDF、Office、压缩包、大日志等若仍由 NAS/云盘/工单系统管理，优先用 `vault_create_external_reference_note` 只记录引用；
+- `vault_export_file` 的 embedded 导出硬上限为 4 MiB；
 - ChatGPT UI 出现破坏性工具确认时，仔细检查调用内容。
 
-已验证的 k3s + ChatGPT tunnel 覆盖范围包括 list、read、write、append、patch、delete、move、search、tag listing、inbox append、image asset upload、note creation with assets 和 external reference note creation。切换主 vault 前，仍然建议从 `.trash/` 和 `.backups/` 做一次恢复演练，并轮换测试期间暴露过的 runtime API key。
+自动化测试已经覆盖通用 import/export 完整性、覆盖保护、大小上限、路径/symlink 边界、embedded-resource 返回和 SDK 兼容性。部署新镜像后应重新跑一次 ChatGPT tunnel 实测矩阵。切换主 vault 前，仍然建议从 `.trash/` 和 `.backups/` 做一次恢复演练，并轮换测试期间暴露过的 runtime API key。

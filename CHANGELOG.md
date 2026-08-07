@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- Generic `vault_import_file` / `vault_export_file` transfer using host file parameters, raw-byte SHA-256/size verification, protected overwrite semantics, and embedded MCP resources.
 - Community code of conduct, structured bug and feature issue forms, and a pull request template.
 - Dedicated CodeQL and Gitleaks workflows.
 - Monthly grouped Dependabot version updates limited to compatible minor and patch releases.
@@ -15,6 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- Removed the Base64-only `vault_upload_image_asset` and `vault_create_note_with_assets` APIs and their image-specific configuration in favor of generic Vault file I/O.
 - Updated the security policy to reflect tagged release support.
 
 - Quick Start now builds the container locally so it works before the GHCR package is made public.

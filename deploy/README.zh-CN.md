@@ -61,8 +61,8 @@ kubectl -n YOUR_NAMESPACE rollout status deploy/obsidian-livesync-controller
 
 - `MCP_REQUIRE_TOKEN=false`
 - `READ_ONLY=false`
-- 开启写入、追加、patch、删除、移动、inbox、图片资产、外部引用笔记工具
-- 图片资产使用 `IMAGE_ASSET_INTEGRITY_MODE=required_for_preserve_original`
+- 开启写入、追加、patch、删除、移动、inbox、通用文件传输、外部引用笔记工具
+- 文件导入默认上限 256 MiB；embedded 导出硬上限 4 MiB
 - `TRASH_DELETE=true`
 - `BACKUP_BEFORE_WRITE=true`
 - 审计日志写到 `/data/audit/obsidian-vault-mcp.audit.log`
@@ -179,8 +179,8 @@ BACKUP_BEFORE_WRITE=true
 - `search_simple`
 - `tag_list`
 - `append_to_inbox`
-- `vault_upload_image_asset`
-- `vault_create_note_with_assets`
+- `vault_import_file`
+- `vault_export_file`
 - `vault_create_external_reference_note`
 
 生产切换前仍建议：
